@@ -1,0 +1,15 @@
+{
+  "name": "poolmasters",
+  "version": "1.0.0",
+  "description": "Pool tournament management: brackets, live ball tracking and match clocks.",
+  "private": true,
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "live": "node scripts/live.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
