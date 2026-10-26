@@ -637,8 +637,8 @@ function rulesView() {
   <section class="rules-section">
     <h2 class="anim">On the table</h2>
     <div class="rules">
-      ${rule('target', 'Open table after the break', 'The table stays <b>open</b> after the break until a player legally pockets a <b>called</b> ball. That claims stripes or solids for the team.')}
-      ${rule('hand', 'Call your shot', 'Call the ball and the pocket for any shot that is not blatantly obvious. That includes <b>all banks and combinations</b>.')}
+      ${rule('target', 'Open table after the break', 'The table stays <b>open</b> after the break until a player legally pockets a ball. That claims stripes or solids for the team.')}
+      ${rule('hand', 'Only the 8 is called', 'No need to call your other shots: any of your balls that drops on a legal shot counts, banks and combinations included. Before shooting the 8, <b>name the pocket</b> it is going in.')}
       ${rule('check', 'A legal shot', 'The cue ball must hit <b>your own suit first</b>. After that, any ball must hit a cushion or drop into a pocket. Anything else is a foul.')}
       ${rule('alert', 'Fouls give ball-in-hand', 'Scratching, hitting the wrong ball first or failing to hit a rail are fouls. The opponent gets the cue ball <b>in hand anywhere</b> on the table.')}
       ${rule('zap', 'Losing on the 8', 'Any of these is an <b>instant loss</b>: sinking the 8-ball before your suit is cleared, scratching while shooting the 8, or sinking it into an uncalled pocket.')}
