@@ -3,10 +3,11 @@
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
 
 const store = require('./src/store');
 const auth = require('./src/auth');
-const bracket = require('./src/bracket');
+const tournament = require('./src/tournament');
 const { HttpError, fail } = require('./src/errors');
 
 const PORT = Number(process.env.PORT) || 3000;
@@ -14,13 +15,14 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'poolmasters';
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const MAX_BODY_BYTES = 16 * 1024;
+const MAX_TEAMS = 32;
 
 const db = store.load();
 // Bumped on every change so pollers can skip re-downloading unchanged state.
 // Seeded with the boot time so a restart never matches a version a client already holds.
 let stateVersion = Date.now();
 
-// ---------------------------------------------------------------- sessions
+// ---------------------------------------------------------------- sessions (admin only)
 
 function pruneSessions() {
   const cutoff = Date.now() - SESSION_TTL_MS;
@@ -31,40 +33,24 @@ function pruneSessions() {
 
 function sessionFor(token) {
   const s = token ? db.sessions[token] : null;
-  if (!s || s.createdAt < Date.now() - SESSION_TTL_MS) return null;
-  if (s.role === 'player' && !db.players[s.playerId]) return null;
-  return s;
+  return s && s.createdAt >= Date.now() - SESSION_TTL_MS ? s : null;
 }
 
-function meFor(session) {
-  if (session?.role === 'admin') return { role: 'admin' };
-  const p = session?.role === 'player' ? db.players[session.playerId] : null;
-  return p ? { role: 'player', player: { id: p.id, name: p.name } } : { role: null };
-}
-
-function startSession(role, playerId = null) {
-  const token = auth.newToken();
-  db.sessions[token] = { role, playerId, createdAt: Date.now() };
-  return { token, me: meFor(db.sessions[token]) };
-}
+const meFor = (session) => ({ role: session ? 'admin' : null });
 
 function requireAdmin(session) {
-  if (session?.role !== 'admin') fail(403, 'Admin only.');
-}
-
-function requirePlayer(session) {
-  if (session?.role !== 'player') fail(401, 'Sign in as a player first.');
-  return db.players[session.playerId];
+  if (!session) fail(403, 'Admin only.');
 }
 
 // ---------------------------------------------------------------- helpers
 
-const getTournament = (id) => db.tournaments[id] || fail(404, 'Tournament not found.');
+const findTeam = (id) => db.teams.find((t) => t.id === id) || fail(404, 'Team not found.');
 
-function cleanTitle(raw) {
-  const title = String(raw ?? '').trim().replace(/\s+/g, ' ');
-  if (title.length < 1 || title.length > 60) fail(400, 'Tournament name must be 1–60 characters.');
-  return title;
+/** Team and player names: 1–24 characters, whitespace collapsed. */
+function cleanName(raw, what) {
+  const name = String(raw ?? '').normalize('NFKC').trim().replace(/\s+/g, ' ');
+  if (name.length < 1 || name.length > 24) fail(400, `${what} must be 1–24 characters.`);
+  return name;
 }
 
 function cleanMinutes(raw, fallback) {
@@ -74,23 +60,63 @@ function cleanMinutes(raw, fallback) {
   return Math.round(n * 2) / 2;
 }
 
-/** The state every client sees. Pocketed balls are hidden from non-admins when live tracking is off. */
-function publicState(isAdmin) {
+function requireSetup(action) {
+  if (db.event.status !== 'setup') fail(409, `Teams are locked while a tournament is on. Reset it to ${action}.`);
+}
+
+/** Next free "Team N" name, so quick-adding teams never collides. */
+function nextTeamName() {
+  const taken = new Set(db.teams.map((t) => t.name.toLowerCase()));
+  let n = db.teams.length + 1;
+  while (taken.has(`team ${n}`)) n += 1;
+  return `Team ${n}`;
+}
+
+/** Snapshot of a finished night, kept for the all-time stats after the next reset. */
+function archive(e) {
+  const team = (id) => {
+    const t = db.teams.find((x) => x.id === id);
+    return t ? { name: t.name, members: t.members.filter((m) => m.active).map((m) => m.name) } : null;
+  };
+  const placeOf = (stage, won) => {
+    const m = e.matches.find((x) => x.stage === stage && x.winner);
+    if (!m) return null;
+    return m[won ? m.winner : m.winner === 'a' ? 'b' : 'a'];
+  };
+  const done = e.matches.filter((m) => m.winner);
+  db.history.unshift({
+    name: e.name,
+    startedAt: e.startedAt,
+    completedAt: e.completedAt,
+    teams: e.groups.flat().length,
+    matches: done.length,
+    balls: done.reduce((n, m) => n + m.potted.length, 0),
+    podium: [placeOf('final', true), placeOf('final', false), placeOf('third', true)].map((id) => (id ? team(id) : null)),
+  });
+}
+
+/** During setup: the schedule the current team list would produce, so everyone can see the night ahead. */
+function previewEvent() {
+  const e = db.event;
+  if (db.teams.length < tournament.MIN_TEAMS) return e;
+  const draft = { ...e, matches: [] };
+  tournament.build(draft, db.teams.map((t) => t.id));
+  return { ...draft, preview: true };
+}
+
+/** The state every client sees. Everything is public; only changes need the admin. */
+function publicState() {
+  const e = db.event.status === 'setup' ? previewEvent() : db.event;
   return {
     serverTime: Date.now(),
     version: stateVersion,
-    settings:{ requirePin: db.settings.requirePin },
-    players: Object.values(db.players).map((p) => ({ id: p.id, name: p.name })),
-    tournaments: Object.values(db.tournaments)
-      .sort((a, b) => b.createdAt - a.createdAt)
-      .map((t) => ({
-        ...t,
-        matches: t.matches.map((m) => ({
-          ...m,
-          status: bracket.status(m),
-          potted: t.liveBalls || isAdmin ? m.potted : null,
-        })),
-      })),
+    teams: db.teams.map(({ id, name, members }) => ({ id, name, members })),
+    event: {
+      ...e,
+      matches: e.matches.map((m) => ({ ...m, status: tournament.status(m) })),
+      standings: e.status === 'setup' ? [] : [0, 1].map((g) => tournament.standings(e, g)),
+    },
+    history: db.history,
   };
 }
 
@@ -109,67 +135,10 @@ function route(method, pattern, handler) {
 route('GET', '/api/me', ({ session }) => meFor(session));
 
 // Polling fallback for networks that block the live stream (e.g. Cloudflare Quick Tunnels).
-route('GET', '/api/state', ({ session, query }) => {
+route('GET', '/api/state', ({ query }) => {
   if (Number(query.get('v')) === stateVersion) return { unchanged: true };
-  return publicState(session?.role === 'admin');
+  return publicState();
 });
-
-const NAME_RULES = "Names must be 2–24 characters: letters, numbers, spaces and . _ - '";
-
-const findPlayerByName = (raw) => {
-  const key = auth.nameKey(raw);
-  return Object.values(db.players).find((p) => p.nameKey === key);
-};
-
-function registerPlayer(body) {
-  const name = auth.cleanName(body.name);
-  if (!name) fail(400, NAME_RULES);
-  if (findPlayerByName(name)) fail(409, 'That name is taken — pick another.');
-  if (db.settings.requirePin && !auth.validPin(body.pin)) fail(400, 'PIN must be 4–6 digits.');
-
-  const player = { id: auth.newId(), name, nameKey: auth.nameKey(name), createdAt: Date.now() };
-  if (db.settings.requirePin) Object.assign(player, auth.hashPin(body.pin));
-  db.players[player.id] = player;
-  return player;
-}
-
-function loginPlayer(body) {
-  const lockKey = `player:${auth.nameKey(body.name)}`;
-  auth.assertNotLocked(lockKey);
-
-  const player = findPlayerByName(body.name);
-  if (!player) fail(404, 'No player with that name yet — create one first.');
-
-  if (db.settings.requirePin) {
-    if (!player.pinHash) {
-      // Registered while PINs were off: the first PIN they sign in with becomes theirs.
-      if (!auth.validPin(body.pin)) fail(400, 'PIN must be 4–6 digits.');
-      Object.assign(player, auth.hashPin(body.pin));
-    } else if (!auth.checkPin(body.pin, player)) {
-      auth.recordFailure(lockKey);
-      fail(401, 'Wrong PIN.');
-    }
-  }
-  auth.clearFailures(lockKey);
-  return player;
-}
-
-/** Step 1 of sign-in: is this name free, or does it belong to someone (and do they have a PIN)? */
-route('GET', '/api/players/check', ({ query }) => {
-  const name = auth.cleanName(query.get('name'));
-  if (!name) fail(400, NAME_RULES);
-  const player = findPlayerByName(name);
-  return {
-    name: player?.name ?? name,
-    exists: Boolean(player),
-    hasPin: Boolean(player?.pinHash),
-    requirePin: db.settings.requirePin,
-  };
-});
-
-route('POST', '/api/register', ({ body }) => startSession('player', registerPlayer(body).id));
-
-route('POST', '/api/login', ({ body }) => startSession('player', loginPlayer(body).id));
 
 route('POST', '/api/admin/login', ({ body, ip }) => {
   const lockKey = `admin:${ip}`;
@@ -179,162 +148,135 @@ route('POST', '/api/admin/login', ({ body, ip }) => {
     fail(401, 'Wrong admin password.');
   }
   auth.clearFailures(lockKey);
-  return startSession('admin');
+  const token = auth.newToken();
+  db.sessions[token] = { createdAt: Date.now() };
+  return { token, me: meFor(db.sessions[token]) };
 });
 
 route('POST', '/api/logout', ({ token }) => {
   if (token) delete db.sessions[token];
 });
 
-route('PATCH', '/api/settings', ({ session, body }) => {
-  requireAdmin(session);
-  if (typeof body.requirePin === 'boolean') db.settings.requirePin = body.requirePin;
-  return db.settings;
-});
+// Teams -------------------------------------------------------------------
 
-// Tournaments -------------------------------------------------------------
-
-route('POST', '/api/tournaments', ({ session, body }) => {
+route('POST', '/api/teams', ({ session, body }) => {
   requireAdmin(session);
-  const t = {
+  requireSetup('add teams');
+  if (db.teams.length >= MAX_TEAMS) fail(409, `That's the maximum of ${MAX_TEAMS} teams.`);
+  const given = Array.isArray(body.members) ? body.members : [];
+  const team = {
     id: auth.newId(),
-    name: cleanTitle(body.name),
-    status: 'registration', // -> 'in_progress' -> 'completed'
-    timerMinutes: cleanMinutes(body.timerMinutes, 10),
-    liveBalls: body.liveBalls !== false,
-    entries: [],
-    rounds: 0,
-    matches: [],
-    championId: null,
+    name: body.name ? cleanName(body.name, 'Team name') : nextTeamName(),
+    members: [0, 1].map((i) => ({ name: given[i] ? cleanName(given[i], 'Player name') : `Player ${i + 1}`, active: true })),
     createdAt: Date.now(),
-    startedAt: null,
-    completedAt: null,
   };
-  db.tournaments[t.id] = t;
-  return { id: t.id };
+  db.teams.push(team);
+  return { id: team.id };
 });
 
-route('PATCH', '/api/tournaments/:id', ({ session, params, body }) => {
+route('PATCH', '/api/teams/:id', ({ session, params, body }) => {
   requireAdmin(session);
-  const t = getTournament(params.id);
-  const name = body.name === undefined ? t.name : cleanTitle(body.name);
-  const timerMinutes = cleanMinutes(body.timerMinutes, t.timerMinutes);
-  const clockChanged = timerMinutes !== t.timerMinutes;
-  Object.assign(t, { name, timerMinutes });
-  if (typeof body.liveBalls === 'boolean') t.liveBalls = body.liveBalls;
-  if (clockChanged) bracket.resetIdleTimers(t);
+  const team = findTeam(params.id);
+  if (body.name !== undefined) team.name = cleanName(body.name, 'Team name');
 });
 
-route('DELETE', '/api/tournaments/:id', ({ session, params }) => {
+route('PATCH', '/api/teams/:id/members/:index', ({ session, params, body }) => {
   requireAdmin(session);
-  getTournament(params.id);
-  delete db.tournaments[params.id];
+  const member = findTeam(params.id).members[Number(params.index)] || fail(404, 'Player not found.');
+  if (body.name !== undefined) member.name = cleanName(body.name, 'Player name');
+  if (typeof body.active === 'boolean') member.active = body.active;
 });
 
-/** Adds the player as pending (or re-adds them after leaving). Returns their entry. */
-function joinTournament(t, player) {
-  const now = Date.now();
-  let entry = t.entries.find((e) => e.playerId === player.id);
-  if (!entry) {
-    entry = { playerId: player.id, status: 'pending', joinedAt: now, updatedAt: now };
-    t.entries.push(entry);
-  } else if (entry.status === 'left') {
-    Object.assign(entry, { status: 'pending', joinedAt: now, updatedAt: now });
+route('DELETE', '/api/teams/:id', ({ session, params }) => {
+  requireAdmin(session);
+  requireSetup('remove teams');
+  findTeam(params.id);
+  db.teams = db.teams.filter((t) => t.id !== params.id);
+});
+
+/** Random order, which also decides the groups (first half is Group 1). */
+route('POST', '/api/teams/shuffle', ({ session }) => {
+  requireAdmin(session);
+  requireSetup('reshuffle');
+  const list = db.teams;
+  for (let i = list.length - 1; i > 0; i--) {
+    const j = crypto.randomInt(i + 1);
+    [list[i], list[j]] = [list[j], list[i]];
   }
-  return entry;
-}
-
-route('POST', '/api/tournaments/:id/join', ({ session, params }) => {
-  const player = requirePlayer(session);
-  const t = getTournament(params.id);
-  if (t.status !== 'registration') fail(409, 'Registration is closed for this tournament.');
-  const existing = t.entries.find((e) => e.playerId === player.id)?.status;
-  if (existing === 'disabled') fail(403, 'The admin has disabled you in this tournament.');
-  if (existing === 'pending' || existing === 'verified') fail(409, "You're already in this tournament.");
-  joinTournament(t, player);
 });
 
-/**
- * Step 2 of sign-in, in the context of a tournament: signs in an existing player (PIN check)
- * or creates a new one, then joins them while registration is open.
- */
-route('POST', '/api/tournaments/:id/enter', ({ params, body }) => {
-  const t = getTournament(params.id);
-  const exists = Boolean(findPlayerByName(body.name));
-  if (!exists && t.status !== 'registration') fail(409, 'Registration is closed — only existing players can sign in here.');
-
-  const player = exists ? loginPlayer(body) : registerPlayer(body);
-  const entry = t.status === 'registration' ? joinTournament(t, player) : t.entries.find((e) => e.playerId === player.id);
-  return { ...startSession('player', player.id), created: !exists, entryStatus: entry?.status ?? null };
-});
-
-route('POST', '/api/tournaments/:id/leave', ({ session, params }) => {
-  const player = requirePlayer(session);
-  const t = getTournament(params.id);
-  if (t.status === 'completed') fail(409, 'This tournament is already finished.');
-  const entry = t.entries.find((e) => e.playerId === player.id);
-  if (!entry || entry.status === 'left' || entry.status === 'disabled') fail(409, "You're not active in this tournament.");
-
-  Object.assign(entry, { status: 'left', updatedAt: Date.now() });
-  bracket.settle(t);
-});
-
-route('POST', '/api/tournaments/:id/entries/:playerId', ({ session, params, body }) => {
+route('POST', '/api/teams/:id/move', ({ session, params, body }) => {
   requireAdmin(session);
-  const t = getTournament(params.id);
-  const entry = t.entries.find((e) => e.playerId === params.playerId) || fail(404, 'That player has not joined.');
-  if (!['verified', 'disabled'].includes(body.status)) fail(400, 'Status must be verified or disabled.');
-  if (t.status === 'completed') fail(409, 'This tournament is finished.');
-  if (entry.status === 'left') fail(409, 'This player left the tournament.');
-  if (t.status !== 'registration' && body.status === 'verified' && !bracket.inBracket(t, entry.playerId)) {
-    fail(409, 'The bracket is already drawn — redraw it to add new players.');
+  requireSetup('reorder teams');
+  const from = db.teams.indexOf(findTeam(params.id));
+  const to = from + (body.by === -1 ? -1 : 1);
+  if (to < 0 || to >= db.teams.length) return;
+  [db.teams[from], db.teams[to]] = [db.teams[to], db.teams[from]];
+});
+
+// Tournament --------------------------------------------------------------
+
+route('PATCH', '/api/event', ({ session, body }) => {
+  requireAdmin(session);
+  const e = db.event;
+  if (body.name !== undefined) {
+    const name = String(body.name).trim().replace(/\s+/g, ' ');
+    if (name.length < 1 || name.length > 60) fail(400, 'Tournament name must be 1–60 characters.');
+    e.name = name;
   }
-
-  Object.assign(entry, { status: body.status, updatedAt: Date.now() });
-  bracket.settle(t);
+  if (body.clockMinutes !== undefined) {
+    const minutes = cleanMinutes(body.clockMinutes, e.clockMinutes);
+    if (minutes !== e.clockMinutes) {
+      e.clockMinutes = minutes;
+      tournament.resetIdleTimers(e);
+    }
+  }
+  if (typeof body.thirdPlace === 'boolean' && body.thirdPlace !== e.thirdPlace) {
+    if (e.status !== 'setup') fail(409, 'Choose the 3rd-place match before starting.');
+    e.thirdPlace = body.thirdPlace;
+  }
 });
 
-route('POST', '/api/tournaments/:id/start', ({ session, params }) => {
+route('POST', '/api/event/start', ({ session }) => {
   requireAdmin(session);
-  const t = getTournament(params.id);
-  if (t.status !== 'registration') fail(409, 'This tournament has already started.');
-  const ids = t.entries.filter((e) => e.status === 'verified').map((e) => e.playerId);
-  if (ids.length < 2) fail(409, 'Verify at least two players before starting.');
-
-  bracket.build(t, ids);
-  t.status = 'in_progress';
-  t.startedAt = Date.now();
-  bracket.settle(t);
+  const e = db.event;
+  if (e.status !== 'setup') fail(409, 'The tournament is already running.');
+  tournament.build(e, db.teams.map((t) => t.id));
+  e.status = 'live';
+  e.startedAt = Date.now();
 });
 
-route('POST', '/api/tournaments/:id/reset', ({ session, params }) => {
+/** Back to setup. A finished night goes into the history first. */
+route('POST', '/api/event/reset', ({ session }) => {
   requireAdmin(session);
-  const t = getTournament(params.id);
-  Object.assign(t, { status: 'registration', rounds: 0, matches: [], championId: null, startedAt: null, completedAt: null });
+  if (db.event.status === 'done') archive(db.event);
+  db.event = store.newEvent(db.event);
 });
 
-route('POST', '/api/tournaments/:id/matches/:matchId/action', ({ session, params, body }) => {
+route('POST', '/api/matches/:id/action', ({ session, params, body }) => {
   requireAdmin(session);
-  const t = getTournament(params.id);
-  const m = t.matches.find((x) => x.id === params.matchId) || fail(404, 'Match not found.');
-  bracket.applyAction(t, m, body);
+  const m = db.event.matches.find((x) => x.id === params.id) || fail(404, 'Match not found.');
+  tournament.applyAction(db.event, m, body);
+});
+
+route('POST', '/api/rounds/:round/action', ({ session, params, body }) => {
+  requireAdmin(session);
+  tournament.roundAction(db.event, Number(params.round), body);
 });
 
 // ---------------------------------------------------------------- live updates (SSE)
 
-const clients = new Map(); // response -> isAdmin
+const clients = new Set();
 
-function statePayload(isAdmin) {
-  return `event: state\ndata: ${JSON.stringify(publicState(isAdmin))}\n\n`;
-}
+const statePayload = () => `event: state\ndata: ${JSON.stringify(publicState())}\n\n`;
 
 function broadcast() {
-  const cache = {};
-  for (const [res, isAdmin] of clients) res.write((cache[isAdmin] ??= statePayload(isAdmin)));
+  if (!clients.size) return;
+  const payload = statePayload();
+  for (const res of clients) res.write(payload);
 }
 
-function handleEvents(req, res, url) {
-  const isAdmin = sessionFor(url.searchParams.get('token'))?.role === 'admin';
+function handleEvents(req, res) {
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
@@ -342,13 +284,13 @@ function handleEvents(req, res, url) {
     'X-Accel-Buffering': 'no',
   });
   res.write('retry: 2000\n\n');
-  res.write(statePayload(isAdmin));
-  clients.set(res, isAdmin);
+  res.write(statePayload());
+  clients.add(res);
   req.on('close', () => clients.delete(res));
 }
 
 setInterval(() => {
-  for (const res of clients.keys()) res.write(': ping\n\n');
+  for (const res of clients) res.write(': ping\n\n');
 }, 25000).unref();
 
 // ---------------------------------------------------------------- http plumbing
@@ -445,7 +387,7 @@ function serveStatic(res, pathname) {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
   try {
-    if (url.pathname === '/api/events' && req.method === 'GET') return handleEvents(req, res, url);
+    if (url.pathname === '/api/events' && req.method === 'GET') return handleEvents(req, res);
     if (url.pathname.startsWith('/api/')) return await handleApi(req, res, url);
     if (req.method !== 'GET' && req.method !== 'HEAD') fail(405, 'Method not allowed.');
     serveStatic(res, url.pathname);

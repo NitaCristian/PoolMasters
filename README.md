@@ -1,6 +1,6 @@
 # PoolMasters 🎱
 
-Pool tournament management: live single-elimination brackets, ball-by-ball tracking and match clocks. See [SPEC.md](SPEC.md) for the full spec.
+Pool night management: admin-run teams of two, a group stage + knockout on 4 tables, live ball tracking and synced match clocks. See [SPEC.md](SPEC.md) for the full spec.
 
 ## Run it
 
@@ -39,18 +39,18 @@ The `--` after `live` is required, so the options reach the app instead of npm. 
 
 ## Typical night
 
-1. **Admin** → `#/admin` → sign in → create a tournament (name, match clock).
-2. **Players** open the tournament and enter their name. A new name lets them choose a PIN; a taken name asks for that player's PIN. Finishing signs them in and joins the tournament.
-3. Admin verifies players (from the control room or the tournament's player board), then taps **Draw bracket**.
-4. Admin opens a match → **Start match & clock** → sets groups → taps balls as they drop → declares the winner. If the clock runs out, a popup asks who wins.
-5. The final winner gets the crown 👑.
+1. **Admin** → `#/admin` → sign in → **Teams** tab → **Add team** for each pair and type the names. (Order decides the groups; use **Shuffle** for a random draw.)
+2. **Tournament** tab → check the clock (15 min by default) → **Start tournament**.
+3. **Tables** tab → **Start all tables** starts every table of the round at the same moment. Set suits, tap balls as they drop, tap the winner. If the clock runs out, a popup shows who has fewer balls left.
+4. Everyone else just opens the site: the landing page shows the tables in play, standings and stats; **Schedule** shows the whole night as a grid; **Rules** has the house rules.
+5. When the final is decided the champions get the crown 👑. **New tournament** saves the night to the Hall of fame.
 
 ## Layout
 
 ```
 server.js          HTTP server, REST routes, SSE live updates, static files
-src/bracket.js     bracket drawing, byes/forfeits, match actions, clock
-src/auth.js        names, PIN hashing, tokens, lockouts
+src/tournament.js  schedule (round robin + knockout), standings, match and round actions, clock
+src/auth.js        admin password check, tokens, lockouts
 src/store.js       JSON persistence
 public/            single-page app (index.html, app.js, styles.css)
 ```

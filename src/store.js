@@ -5,14 +5,38 @@ const path = require('node:path');
 
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
+const VERSION = 2;
+
+const newEvent = (prev = {}) => ({
+  name: prev.name ?? 'Pool Night',
+  status: 'setup', // -> 'live' -> 'done'
+  clockMinutes: prev.clockMinutes ?? 15,
+  thirdPlace: prev.thirdPlace ?? true,
+  groups: [],
+  groupRounds: 0,
+  rounds: 0,
+  tables: 0,
+  advance: 0,
+  matches: [],
+  championId: null,
+  startedAt: null,
+  completedAt: null,
+});
 
 const empty = () => ({
-  version: 1,
-  settings: { requirePin: true },
-  players: {},
+  version: VERSION,
   sessions: {},
-  tournaments: {},
+  teams: [], // [{ id, name, members: [{ name, active }], createdAt }] — order = seed
+  event: newEvent(),
+  history: [], // finished nights: { name, completedAt, podium: [{ name, members }], ... }
 });
+
+/** Moves a file we will not use out of the way, so it is never overwritten. */
+function setAside(label) {
+  const backup = path.join(DATA_DIR, `db.${label}-${Date.now()}.json`);
+  fs.renameSync(DB_FILE, backup);
+  return backup;
+}
 
 function load() {
   let raw;
@@ -22,16 +46,19 @@ function load() {
     if (err.code === 'ENOENT') return empty();
     throw err;
   }
+  let data;
   try {
-    const data = JSON.parse(raw);
-    return { ...empty(), ...data, settings: { ...empty().settings, ...data.settings } };
+    data = JSON.parse(raw);
   } catch {
-    // Never silently overwrite a file we could not parse — keep it for recovery.
-    const backup = path.join(DATA_DIR, `db.corrupt-${Date.now()}.json`);
-    fs.renameSync(DB_FILE, backup);
-    console.error(`[store] db.json was unreadable; moved it to ${backup} and started fresh.`);
+    console.error(`[store] db.json was unreadable; moved it to ${setAside('corrupt')} and started fresh.`);
     return empty();
   }
+  if (data.version !== VERSION) {
+    // v1 had players, PINs and brackets — nothing that maps onto teams. Keep it for reference.
+    console.warn(`[store] db.json is from an older version; moved it to ${setAside(`v${data.version ?? 1}`)} and started fresh.`);
+    return empty();
+  }
+  return { ...empty(), ...data, event: { ...newEvent(), ...data.event } };
 }
 
 function write(db) {
@@ -53,4 +80,4 @@ function flush(db) {
   write(db);
 }
 
-module.exports = { load, save, flush, DB_FILE };
+module.exports = { load, save, flush, newEvent, DB_FILE };

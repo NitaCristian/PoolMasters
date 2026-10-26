@@ -7,25 +7,22 @@
 const BALL_COLORS = ['', '#f5c518', '#1e4fd8', '#d92b2b', '#6b2fb8', '#f47a14', '#16834a', '#8a1c22', '#15171a'];
 const SOLIDS = [1, 2, 3, 4, 5, 6, 7];
 const STRIPES = [9, 10, 11, 12, 13, 14, 15];
-const RACK_ROWS = [[1], [9, 2], [10, 8, 3], [11, 4, 12, 5], [6, 13, 7, 14, 15]];
 const GROUPS = {
   solids: { label: 'Solids', icon: 1, balls: SOLIDS },
   stripes: { label: 'Stripes', icon: 9, balls: STRIPES },
 };
+const GROUP_NAMES = ['Group 1', 'Group 2'];
+const STAGE = { group: 'Group stage', qf: 'Quarterfinals', sf: 'Semifinals', final: 'Final', third: '3rd place' };
 const SSE_TIMEOUT_MS = 5000; // no live update by then -> switch to polling
 const POLL_MS = 2000;
-const ENTRY_RANK ={ verified: 0, pending: 1, disabled: 2, left: 2 };
-const T_STATUS = {
-  registration: ['Registration open', 'blue'],
-  in_progress: ['Live', 'green'],
-  completed: ['Finished', 'gold'],
-};
+const REDUCED_MOTION = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 const ICON_PATHS = {
   arrowLeft: '<path d="M19 12H5M12 19l-7-7 7-7"/>',
   arrowRight: '<path d="M5 12h14M12 5l7 7-7 7"/>',
+  arrowUp: '<path d="M12 19V5M5 12l7-7 7 7"/>',
+  arrowDown: '<path d="M12 5v14M19 12l-7 7-7-7"/>',
   check: '<path d="M20 6 9 17l-5-5"/>',
-  ban: '<circle cx="12" cy="12" r="9"/><path d="m5.6 5.6 12.8 12.8"/>',
   play: '<path d="M7 4v16l13-8z" fill="currentColor"/>',
   pause: '<path d="M8 5v14M16 5v14"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
@@ -37,10 +34,15 @@ const ICON_PATHS = {
   undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/>',
   users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/>',
   shield: '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/>',
-  eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
-  eyeOff: '<path d="M3 3l18 18M10.6 5.1A10 10 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3.2 4M6.6 6.6C3.8 8.4 2 12 2 12s3.5 7 10 7a9.6 9.6 0 0 0 5.4-1.6"/>',
-  board: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
-  gear:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+  grid: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/>',
+  shuffle: '<path d="M16 3h5v5M4 20 21 3M21 16v5h-5M15 15l6 6M4 4l5 5"/>',
+  gear: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1 7 17M17 7l2.1-2.1"/>',
+  target: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1" fill="currentColor"/>',
+  flag: '<path d="M4 22V4M4 4h13l-2 4 2 4H4"/>',
+  zap: '<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>',
+  hand: '<path d="M18 11V6a2 2 0 0 0-4 0M14 10V4a2 2 0 0 0-4 0v2M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.9-6-2.4l-3.6-3.6a2 2 0 0 1 2.8-2.8L7 15"/>',
+  alert: '<path d="M12 3 2 21h20z"/><path d="M12 10v5M12 18h.01"/>',
+  book: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5z"/><path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5"/>',
 };
 
 const icon = (name) =>
@@ -60,32 +62,40 @@ const $toasts = document.getElementById('toast-root');
 const S = {
   state: null, // server snapshot (pushed over SSE)
   me: { role: null },
-  token: readToken(),
+  token: readStored('pm_token'),
   offset: 0, // serverTime - local time, so every device shows the same clock
   online: false,
   events: null,
   polling: false, // true when live updates are blocked and we refresh every POLL_MS instead
-  names: new Map(),
-  auth: { ctx: null, step: 'name' }, // two-step sign-in progress; ctx = tournament id or null
+  teams: new Map(),
   modal: null,
   acked: new Set(), // time-up alerts the admin already handled
   renderedKey: null,
+  adminTab: readStored('pm_tab'),
+  adminRound: null, // null = follow the current round
+  focusAfter: null, // element id to focus once it shows up (e.g. a team just added)
+  fx: emptyFx(), // what changed in the last update, so only that animates
+  counts: new Map(), // last shown value of each animated counter
 };
 
-function readToken() {
+function emptyFx() {
+  return { potted: new Set(), unpotted: new Set(), finished: new Set(), started: new Set(), champion: false };
+}
+
+function readStored(key) {
   try {
-    return localStorage.getItem('pm_token');
+    return localStorage.getItem(key);
   } catch {
     return null;
   }
 }
 
-function writeToken(token) {
+function writeStored(key, value) {
   try {
-    if (token) localStorage.setItem('pm_token', token);
-    else localStorage.removeItem('pm_token');
+    if (value) localStorage.setItem(key, value);
+    else localStorage.removeItem(key);
   } catch {
-    /* storage unavailable — session lasts for this tab only */
+    /* storage unavailable — lasts for this tab only */
   }
 }
 
@@ -98,17 +108,35 @@ const esc = (s) =>
 
 const now = () => Date.now() + S.offset;
 const isAdmin = () => S.me.role === 'admin';
-const nameOf = (id) => S.names.get(id) ?? 'Unknown player';
-const findT = (id) => S.state?.tournaments.find((t) => t.id === id);
-const findMatch = (tid, mid) => findT(tid)?.matches.find((m) => m.id === mid);
-const myEntry = (t) => (S.me.role === 'player' ? t.entries.find((e) => e.playerId === S.me.player.id) : null);
-const entryOf = (t, pid) => t.entries.find((e) => e.playerId === pid);
+const E = () => S.state.event;
+const team = (id) => S.teams.get(id);
+const teamName = (id) => team(id)?.name ?? 'TBD';
+const activeMembers = (id) => team(id)?.members.filter((m) => m.active) ?? [];
+const memberLine = (id) => activeMembers(id).map((m) => m.name).join(' & ') || 'No active players';
+const findMatch = (id) => E().matches.find((m) => m.id === id);
+const matchAt = (round, table) => E().matches.find((m) => m.round === round && m.table === table);
+const ordinal = (n) => n + ({ 1: 'st', 2: 'nd', 3: 'rd' }[n] ?? 'th');
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
 const groupOf = (m, slot) => {
   if (!m.groupA) return null;
   if (slot === 'a') return m.groupA;
   return m.groupA === 'solids' ? 'stripes' : 'solids';
 };
 
+/** Balls of their own set still on the table, or null while the table is open. */
+function ballsLeft(m, slot) {
+  const g = groupOf(m, slot);
+  return g ? GROUPS[g].balls.filter((n) => !m.potted.includes(n)).length : null;
+}
+
+/** Same rule as the server: own balls pocketed, plus the 8 for a team that won with it down. */
+function cleared(m, slot) {
+  const left = ballsLeft(m, slot);
+  return (left === null ? 0 : 7 - left) + (m.winner === slot && m.potted.includes(8) ? 1 : 0);
+}
+
+const other = (slot) => (slot === 'a' ? 'b' : 'a');
 const timeLeft = (m) => (m.timer.running ? Math.max(0, m.timer.endsAt - now()) : m.timer.remainingMs);
 const isExpired = (m) => m.status === 'live' && m.timer.durationMs > 0 && m.timer.running && timeLeft(m) === 0;
 
@@ -117,15 +145,44 @@ function fmt(ms) {
   return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
 }
 
-function roundName(round, total) {
-  const left = total - round;
-  if (left === 0) return 'Final';
-  if (left === 1) return 'Semifinals';
-  if (left === 2) return 'Quarterfinals';
-  return `Round of ${2 ** (left + 1)}`;
+const clockTime = (ts) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+/** The round being played: the first with an undecided match. */
+function currentRound(e) {
+  const open = e.matches.filter((m) => !m.winner).map((m) => m.round);
+  return open.length ? Math.min(...open) : e.rounds;
 }
 
-const matchNumber = (t, m) => t.matches.indexOf(m) + 1;
+function roundStage(e, r) {
+  if (r <= e.groupRounds) return STAGE.group;
+  const stage = matchAt(r, 1)?.stage;
+  return stage === 'final' ? 'Finals' : STAGE[stage] ?? '';
+}
+
+const roundTitle = (e, r) => `Round ${r}`;
+
+function shortLabel(m) {
+  if (m.stage === 'qf') return `QF${m.table}`;
+  if (m.stage === 'sf') return `SF${m.table}`;
+  if (m.stage === 'group') return `${GROUP_NAMES[m.group]} · T${m.table}`;
+  return STAGE[m.stage];
+}
+
+function srcLabel(src) {
+  if (!src) return 'TBD';
+  if (src.rank) return `${ordinal(src.rank.place)} G${src.rank.group + 1}`;
+  const from = findMatch(src.winner ?? src.loser);
+  return `${src.winner ? 'Winner' : 'Loser'} ${from ? shortLabel(from) : ''}`;
+}
+
+const slotName = (m, s) => (m[s] ? teamName(m[s]) : srcLabel(m[s === 'a' ? 'srcA' : 'srcB']));
+
+/** Who is sitting out a group round: every group team without a match that round. */
+function restingIn(e, r) {
+  if (r > e.groupRounds) return [];
+  const playing = new Set(e.matches.filter((m) => m.round === r).flatMap((m) => [m.a, m.b]));
+  return e.groups.map((ids, g) => ({ g, ids: ids.filter((id) => !playing.has(id)) })).filter((x) => x.ids.length);
+}
 
 async function api(method, url, body) {
   const headers = { 'Content-Type': 'application/json' };
@@ -137,7 +194,7 @@ async function api(method, url, body) {
   return data;
 }
 
-const act = (tid, mid, body) => api('POST', `/api/tournaments/${tid}/matches/${mid}/action`, body);
+const act = (mid, body) => api('POST', `/api/matches/${mid}/action`, body);
 
 async function run(fn) {
   try {
@@ -178,56 +235,52 @@ function beep() {
    Building blocks
    ===================================================================== */
 
-function ball(n, size = 32, potted = false) {
+function ball(n, size = 32, potted = false, extra = '') {
   const kind = n === 8 ? 'eight' : n > 8 ? 'stripe' : 'solid';
   const color = BALL_COLORS[n > 8 ? n - 8 : n];
-  const cls = `ball ${kind}${potted ? ' potted' : ''}${size < 20 ? ' tiny' : ''}`;
+  const cls = `ball ${kind}${potted ? ' potted' : ''}${size < 20 ? ' tiny' : ''} ${extra}`;
   return `<span class="${cls}" style="--c:${color};--size:${size}px" role="img" aria-label="Ball ${n}${potted ? ', pocketed' : ''}"><span class="ball-num">${n}</span></span>`;
 }
 
+/** A ball in a match, animated when it just dropped (or came back). */
+function matchBall(m, n, size) {
+  const key = `${m.id}:${n}`;
+  const fx = S.fx.potted.has(key) ? 'drop' : S.fx.unpotted.has(key) ? 'unpot' : '';
+  return ball(n, size, m.potted.includes(n), fx);
+}
+
 function avatar(name, size = '') {
-  const initials = name
+  const initials = String(name)
     .split(/\s+/)
     .map((w) => [...w][0] ?? '')
     .join('')
     .slice(0, 2)
     .toUpperCase();
-  const hue = [...name].reduce((h, c) => (h * 31 + c.codePointAt(0)) % 360, 7);
+  const hue = [...String(name)].reduce((h, c) => (h * 31 + c.codePointAt(0)) % 360, 7);
   return `<span class="avatar ${size}" style="--h:${hue}" aria-hidden="true">${esc(initials)}</span>`;
 }
 
 const pill = (label, tone, lead = '') => `<span class="pill ${tone}">${lead}${esc(label)}</span>`;
-
-function tStatusPill(t) {
-  const [label, tone] = T_STATUS[t.status];
-  return pill(label, tone, t.status === 'in_progress' ? '<span class="live-dot"></span>' : '');
-}
-
-function entryBadge(e) {
-  return {
-    pending: pill('Awaiting verification', 'amber'),
-    verified: pill("You're in", 'green', icon('check')),
-    disabled: pill('Disabled by admin', 'red'),
-    left: pill('You left', 'muted'),
-  }[e.status];
-}
-
+const livePill = (label = 'Live', size = '') => pill(label, `green ${size}`, '<span class="live-dot"></span>');
 const groupChip = (g) => `<span class="chip group">${ball(GROUPS[g].icon, 16)}${GROUPS[g].label}</span>`;
 
-function emptyState(title, body, art = 8) {
-  return `<div class="empty">${ball(art, 56)}<h3>${esc(title)}</h3><p class="muted">${esc(body)}</p></div>`;
+function emptyState(title, body, art = 8, extra = '') {
+  return `<div class="empty anim">${ball(art, 56, false, 'float')}<h3>${esc(title)}</h3><p class="muted">${esc(body)}</p>${extra}</div>`;
 }
 
-function notFound() {
-  return `<a class="back" href="#/">${icon('arrowLeft')} All tournaments</a>${emptyState('Nothing on this table', 'That tournament or match does not exist anymore.')}`;
-}
-
-/** Where a player stands in a drawn bracket. */
-function playerFate(t, pid) {
-  if (t.status === 'registration' || !t.matches.some((m) => m.a === pid || m.b === pid)) return null;
-  if (t.championId === pid) return 'champion';
-  const lost = t.matches.some((m) => m.winner && m[m.winner === 'a' ? 'b' : 'a'] === pid);
-  return lost ? 'out' : 'alive';
+function statusTag(m, size = 'xs') {
+  const e = E();
+  if (m.status === 'live') {
+    return m.timer.durationMs
+      ? `<span class="pill green ${size}"><span class="live-dot"></span><span data-timer="${m.id}">${fmt(timeLeft(m))}</span></span>`
+      : livePill('Live', size);
+  }
+  if (m.status === 'done') return m.result === 'timeout' ? pill('On time', `amber ${size}`) : pill('Final', `gold ${size}`);
+  if (m.status === 'ready') {
+    if (m.startedAt) return pill('Paused', `amber ${size}`);
+    return m.round === currentRound(e) && !e.preview ? pill('Up next', `blue ${size}`) : '';
+  }
+  return pill('TBD', `muted ${size}`);
 }
 
 /* =====================================================================
@@ -235,671 +288,380 @@ function playerFate(t, pid) {
    ===================================================================== */
 
 function navView(r) {
-  let who;
-  if (S.me.role === 'player') {
-    who = `<div class="who">${avatar(S.me.player.name, 'sm')}<span class="who-name">${esc(S.me.player.name)}</span>
-      <button class="icon-btn" data-action="logout" title="Sign out" aria-label="Sign out">${icon('logout')}</button></div>`;
-  } else if (S.me.role === 'admin') {
-    who = `<div class="who">${pill('Admin', 'gold', icon('shield'))}
-      <button class="icon-btn" data-action="logout" title="Sign out" aria-label="Sign out">${icon('logout')}</button></div>`;
-  } else {
-    who = `<a class="btn ghost sm" href="#/">Sign in</a>`;
-  }
+  const link = (href, name, label) => `<a href="${href}" class="${r.name === name ? 'active' : ''}">${label}</a>`;
+  const live = S.state?.event.status === 'live';
   return `<div class="topbar-inner">
-    <a class="brand" href="#/">${ball(8, 30)}<span class="brand-text">Pool<b>Masters</b></span></a>
+    <a class="brand" href="#/">${ball(8, 30, false, 'spin-hover')}<span class="brand-text">Pool<b>Masters</b></span></a>
     <nav class="nav">
-      <a href="#/" class="${r.name !== 'admin' ? 'active' : ''}">Tournaments</a>
-      <a href="#/admin" class="${r.name === 'admin' ? 'active' : ''}">Admin</a>
+      ${link('#/', 'home', `${live ? '<span class="live-dot"></span>' : ''}Live`)}
+      ${link('#/schedule', 'schedule', 'Schedule')}
+      ${link('#/rules', 'rules', 'Rules')}
+      ${link('#/admin', 'admin', isAdmin() ? `${icon('shield')}<span class="nav-label">Admin</span>` : 'Admin')}
     </nav>
     <div class="topbar-right">
       <span class="conn ${S.online ? 'on' : ''} ${S.polling ? 'poll' : ''}" title="${!S.online ? 'Reconnecting…' : S.polling ? `Updating every ${POLL_MS / 1000} s` : 'Live'}"></span>
-      ${who}
+      ${isAdmin() ? `<button class="icon-btn" data-action="logout" title="Sign out" aria-label="Sign out">${icon('logout')}</button>` : ''}
     </div>
   </div>`;
 }
 
 /* =====================================================================
-   Home
+   Home: the night at a glance
    ===================================================================== */
 
 function homeView() {
-  const ts = S.state.tournaments;
-  const liveCount = ts.filter((t) => t.status === 'in_progress').length;
+  const e = E();
+  if (e.status === 'setup') return setupHome(e);
+  const r = currentRound(e);
+  const done = e.matches.filter((m) => m.winner).length;
   return `
-  <section class="hero">
-    <div class="hero-copy">
-      <span class="eyebrow">Tournament night, sorted</span>
-      <h1>Rack 'em up.<br><span class="grad">Run the bracket.</span></h1>
-      <p class="lead">Join with your name, follow the bracket live and watch every ball drop — from any phone at the table.</p>
-      <div class="hero-stats">
-        <div><b>${liveCount}</b><span>live now</span></div>
-        <div><b>${ts.length}</b><span>tournaments</span></div>
-        <div><b>${S.state.players.length}</b><span>players</span></div>
-      </div>
-      <div class="hero-balls" aria-hidden="true">${[1, 9, 3, 8, 12, 6, 14].map((n) => ball(n, 40)).join('')}</div>
+  ${e.status === 'done' ? championBanner(e) : ''}
+  <section class="live-hero anim">
+    <div class="lh-copy">
+      <span class="eyebrow">${e.status === 'done' ? 'Final results' : `${roundTitle(e, r)} of ${e.rounds} · ${roundStage(e, r)}`}</span>
+      <h1>${esc(e.name)}</h1>
+      ${roundTrack(e, r)}
     </div>
-    ${heroAside()}
+    ${statTiles(e, done)}
   </section>
-  <section class="section">
-    <div class="section-head"><h2>Tournaments</h2>${isAdmin() ? `<a class="btn primary sm" href="#/admin">${icon('plus')} New tournament</a>` : ''}</div>
-    ${ts.length ? `<div class="t-grid">${ts.map(tournamentCard).join('')}</div>` : emptyState('No tournaments yet', 'The admin will open one soon.')}
-  </section>`;
+  ${e.status === 'live' ? `<section class="section anim">
+    <div class="section-head"><h2>${e.matches.some((m) => m.status === 'live') ? livePill('Live') : ''} On the tables</h2>
+      <a class="btn ghost sm" href="#/schedule">${icon('grid')} Full schedule</a></div>
+    ${tablesStrip(e, r)}
+  </section>` : ''}
+  <section class="section anim">
+    <div class="section-head"><h2>Group standings</h2><span class="muted small">Win = 1 point · top ${e.advance} of each group go through</span></div>
+    <div class="standings-grid">${[0, 1].map((g) => standingsCard(e, g)).join('')}</div>
+  </section>
+  <section class="section anim">
+    <div class="section-head"><h2>Road to the final</h2></div>
+    ${knockoutView(e)}
+  </section>
+  <section class="section anim">
+    <div class="section-head"><h2>Leaders</h2></div>
+    ${leaders(e)}
+  </section>
+  ${historySection()}`;
 }
 
-function heroAside() {
-  if (!S.me.role) {
-    // Players sign in inside a tournament; the stand-alone form is only for when nothing is open.
-    const open = S.state.tournaments.filter((t) => t.status === 'registration');
-    if (open.length) return openTournamentsCard(open);
-    return `<div class="card auth-card">
-      <span class="eyebrow">Players</span>
-      <h3 class="auth-title">Sign in or create your player</h3>
-      ${authFlow(null)}
-    </div>`;
+/** One segment per round: done, current, upcoming. Knockout rounds in gold. */
+function roundTrack(e, r) {
+  const segs = [];
+  for (let i = 1; i <= e.rounds; i++) {
+    const ms = e.matches.filter((m) => m.round === i);
+    const share = ms.length ? ms.filter((m) => m.winner).length / ms.length : 0;
+    const state = share === 1 ? 'done' : i === r && e.status === 'live' ? 'now' : '';
+    segs.push(`<span class="seg-r ${state} ${i > e.groupRounds ? 'ko' : ''}" title="${roundTitle(e, i)} · ${roundStage(e, i)}" style="--fill:${Math.round(share * 100)}%"><i></i><b>${i}</b></span>`);
   }
-  if (isAdmin()) {
-    const pending = S.state.tournaments.reduce((n, t) => n + (t.status === 'registration' ? t.entries.filter((e) => e.status === 'pending').length : 0), 0);
-    const live = S.state.tournaments.reduce((n, t) => n + t.matches.filter((m) => m.status === 'live').length, 0);
-    return `<div class="card aside-card">
-      <span class="eyebrow">Signed in as admin</span>
-      <div class="kpis"><div><b>${pending}</b><span>to verify</span></div><div><b>${live}</b><span>tables live</span></div></div>
-      <a class="btn primary block" href="#/admin">${icon('gear')} Open control room</a>
-    </div>`;
+  return `<div class="round-track" aria-label="Rounds">${segs.join('')}</div>
+    <div class="track-legend"><span>${STAGE.group}</span><span class="ko">Knockout</span></div>`;
+}
+
+function statTiles(e, done) {
+  const finished = e.matches.filter((m) => m.winner && m.startedAt && m.finishedAt);
+  const avg = finished.length ? finished.reduce((s, m) => s + (m.finishedAt - m.startedAt), 0) / finished.length : 0;
+  const tile = (key, value, label, ic, suffix = '') =>
+    `<div class="stat"><span class="stat-ic">${icon(ic)}</span><b><span data-count="${key}">${value}</span>${suffix}</b><span>${label}</span></div>`;
+  return `<div class="stat-tiles">
+    ${tile('matches', done, `of ${e.matches.length} matches played`, 'flag')}
+    ${tile('balls', e.matches.reduce((n, m) => n + m.potted.length, 0), 'balls pocketed', 'target')}
+    ${tile('eights', e.matches.filter((m) => m.potted.includes(8)).length, '8-balls sunk', 'zap')}
+    <div class="stat"><span class="stat-ic">${icon('clock')}</span><b>${avg ? fmt(avg) : '—'}</b><span>average match</span></div>
+  </div>`;
+}
+
+/** Read-only mini tables for the round in play. */
+function tablesStrip(e, r) {
+  const tiles = [];
+  for (let t = 1; t <= e.tables; t++) {
+    const m = matchAt(r, t);
+    tiles.push(m ? miniTable(e, m) : `<div class="mini-table open"><span class="mt-num">Table ${t}</span><span class="muted">Open play</span></div>`);
   }
-  const mine = S.state.tournaments.map((t) => [t, myEntry(t)]).filter(([, e]) => e);
-  return `<div class="card aside-card">
-    <div class="welcome">${avatar(S.me.player.name, 'lg')}<div><span class="eyebrow">Welcome back</span><h3>${esc(S.me.player.name)}</h3></div></div>
-    ${mine.length
-      ? `<div class="mini-list">${mine.map(([t, e]) => `<a class="mini-item" href="#/t/${t.id}"><div class="r-body"><div class="r-name">${esc(t.name)}</div></div>${entryBadge(e)}</a>`).join('')}</div>`
-      : '<p class="muted">Pick a tournament below and hit <b>Join</b>.</p>'}
-  </div>`;
+  const resting = restingIn(e, r);
+  return `<div class="tables-strip">${tiles.join('')}</div>
+    ${resting.length ? `<p class="resting-line">${icon('pause')} Resting: ${resting.map((x) => x.ids.map((id) => `<span class="chip muted">${esc(teamName(id))}</span>`).join('')).join('')}</p>` : ''}`;
 }
 
-function openTournamentsCard(open) {
-  return `<div class="card aside-card">
-    <div><span class="eyebrow">Open for registration</span><h3 class="auth-title">Join a tournament</h3>
-      <p class="muted small">Pick one and enter your name. New players can sign up right there.</p></div>
-    <div class="mini-list">${open
-      .map((t) => {
-        const players = t.entries.filter((e) => e.status === 'pending' || e.status === 'verified').length;
-        return `<a class="mini-item" href="#/t/${t.id}">
-          <div class="r-body"><div class="r-name">${esc(t.name)}</div>
-            <div class="r-sub">${players} joined · ${t.timerMinutes ? `${t.timerMinutes} min clock` : 'no clock'}</div></div>
-          <span class="btn sm primary">Join ${icon('arrowRight')}</span>
-        </a>`;
-      })
-      .join('')}</div>
-  </div>`;
-}
-
-/**
- * Two-step player sign-in. Step 1: name (checked against the server). Step 2: PIN — set a new one
- * when the name is free, or enter yours when it is taken. With a tournament `t`, finishing also joins it.
- */
-function authFlow(t) {
-  const ctx = t?.id ?? null;
-  const a = S.auth.ctx === ctx ? S.auth : { step: 'name' };
-  const needPin = S.state.settings.requirePin;
-  const steps = `<ol class="steps" aria-label="Sign-in steps">
-    <li class="${a.step === 'name' ? 'on' : 'done'}"><span>${a.step === 'name' ? '1' : icon('check')}</span>Name</li>
-    <li class="${a.step === 'pin' ? 'on' : ''}"><span>2</span>${needPin ? 'PIN' : 'Confirm'}</li>
-  </ol>`;
-  const error = a.error ? `<p class="form-error" role="alert">${esc(a.error)}</p>` : '';
-
-  if (a.step !== 'pin') {
-    return `${steps}<form data-form="auth-name" data-ctx="${ctx ?? ''}" class="stack" autocomplete="off">
-      <label class="field"><span>Your player name</span>
-        <input id="auth-name" name="name" required minlength="2" maxlength="24" placeholder="e.g. Fast Eddie" autocomplete="username" value="${esc(a.name ?? '')}"></label>
-      ${error}
-      <button class="btn primary block" type="submit">Continue ${icon('arrowRight')}</button>
-      <p class="hint">New here? Pick a name nobody has. Back again? Use the same name as before.</p>
-    </form>`;
-  }
-
-  const joining = t?.status === 'registration';
-  let prompt;
-  if (!a.exists) prompt = needPin ? 'Choose a 4–6 digit PIN to claim it.' : 'Create a player with this name?';
-  else if (!needPin) prompt = 'Is this you?';
-  else prompt = a.hasPin ? 'Enter your PIN to continue.' : 'Set a 4–6 digit PIN — you will use it from now on.';
-  const submit = (a.exists ? 'Sign in' : 'Create player') + (joining ? ' & join' : '');
-  return `${steps}<form data-form="auth-pin" class="stack" autocomplete="off">
-    <div class="auth-who">${avatar(a.name, 'lg')}
-      <div><h3>${a.exists ? `Welcome back, ${esc(a.name)}` : `“${esc(a.name)}” is free`}</h3><p class="muted small">${prompt}</p></div>
-    </div>
-    <input type="text" name="username" value="${esc(a.name)}" autocomplete="username" hidden>
-    ${needPin ? `<input id="auth-pin" class="pin-input" name="pin" type="password" inputmode="numeric" pattern="\\d{4,6}" minlength="4" maxlength="6" required placeholder="••••" aria-label="PIN" autocomplete="${a.exists && a.hasPin ? 'current-password' : 'new-password'}">` : ''}
-    ${error}
-    <button class="btn primary block" type="submit">${submit}</button>
-    <button class="btn ghost block" type="button" data-action="auth-back">${icon('arrowLeft')} ${a.exists ? 'Not you? Change name' : 'Use a different name'}</button>
-  </form>`;
-}
-
-/** Shown on a tournament page to signed-out visitors: the sign-in flow that also joins. */
-function joinPanel(t) {
-  if (S.me.role || t.status === 'completed') return '';
-  const open = t.status === 'registration';
-  return `<div class="card join-panel">
-    <div class="join-copy">
-      <span class="eyebrow">${open ? 'Registration open' : 'Players'}</span>
-      <h2>${open ? 'Join this tournament' : 'Playing in this one?'}</h2>
-      <p class="muted">${open
-        ? 'Enter your name. New players choose a PIN, returning players enter theirs. The admin verifies you before the bracket is drawn.'
-        : 'Registration is closed, but players can sign in to follow their matches.'}</p>
-    </div>
-    <div class="join-form">${authFlow(t)}</div>
-  </div>`;
-}
-
-function tournamentCard(t) {
-  const verified = t.entries.filter((e) => e.status === 'verified').length;
-  const pending = t.entries.filter((e) => e.status === 'pending').length;
-  const live = t.matches.filter((m) => m.status === 'live').length;
-  const mine = myEntry(t);
-  let foot;
-  if (t.status === 'completed') {
-    foot = `<div class="t-foot champ">${CROWN}<span>${esc(nameOf(t.championId))}</span></div>`;
-  } else if (t.status === 'in_progress') {
-    const done = t.matches.filter((m) => m.status === 'done').length;
-    foot = `<div class="t-foot">${live ? `<span class="live-dot"></span>${live} table${live === 1 ? '' : 's'} live` : 'Between matches'}</div>
-      <div class="progress"><span style="width:${Math.round((done / t.matches.length) * 100)}%"></span></div>`;
-  } else {
-    foot = `<div class="t-foot">${verified} verified${pending ? ` · <span class="amber-text">${pending} awaiting</span>` : ''}</div>`;
-  }
-  const art = (t.id.charCodeAt(0) % 15) + 1;
-  return `<a class="t-card st-${t.status}" href="#/t/${t.id}">
-    <div class="t-card-art" aria-hidden="true">${ball(art, 92)}</div>
-    <div class="t-card-top">${tStatusPill(t)}${mine ? entryBadge(mine) : ''}</div>
-    <h3>${esc(t.name)}</h3>
-    <div class="t-meta"><span>${icon('users')} ${verified} player${verified === 1 ? '' : 's'}</span><span>${icon('clock')} ${t.timerMinutes ? `${t.timerMinutes} min clock` : 'No clock'}</span></div>
-    ${foot}
-  </a>`;
-}
-
-/* =====================================================================
-   Tournament
-   ===================================================================== */
-
-function tournamentView(id) {
-  const t = findT(id);
-  if (!t) return notFound();
-  const verified = t.entries.filter((e) => e.status === 'verified').length;
-  const started = t.status !== 'registration';
-  const bracketSection = started
-    ? `<section class="section">
-        <div class="section-head"><h2>Bracket</h2><span class="muted">${t.rounds} round${t.rounds === 1 ? '' : 's'} · single elimination</span></div>
-        ${bracketView(t)}
-      </section>`
-    : '';
-  return `
-  <a class="back" href="#/">${icon('arrowLeft')} All tournaments</a>
-  <div class="page-head">
-    <div>
-      <div class="title-row"><h1>${esc(t.name)}</h1>${tStatusPill(t)}</div>
-      <div class="meta-row">
-        <span>${icon('users')} ${verified} verified</span>
-        <span>${icon('clock')} ${t.timerMinutes ? `${t.timerMinutes} min match clock` : 'No match clock'}</span>
-        <span>${icon(t.liveBalls ? 'eye' : 'eyeOff')} Live balls ${t.liveBalls ? 'on' : 'off'}</span>
-      </div>
-    </div>
-    <div class="head-actions">${playerActions(t)}${isAdmin() ? adminTournamentActions(t, verified) : ''}</div>
-  </div>
-  ${joinPanel(t)}
-  ${isAdmin() ? tournamentSettings(t) : ''}
-  ${t.status === 'completed' ? championBanner(t) : ''}
-  ${started && !isAdmin() ? nowPlaying(t) : ''}
-  ${t.status === 'in_progress' && isAdmin() ? `<section class="section"><div class="section-head"><h2>Matches</h2><span class="muted">Tap one to run it</span></div>${matchQueue(t)}</section>` : ''}
-  ${bracketSection}
-  <section class="section">
-    <div class="section-head"><h2>Players</h2>
-      <div class="legend"><span class="lg verified">Verified</span><span class="lg pending">Awaiting</span><span class="lg out">Disabled / left</span></div>
-    </div>
-    ${rosterView(t)}
-  </section>`;
-}
-
-function playerActions(t) {
-  if (S.me.role !== 'player') return '';
-  const e = myEntry(t);
-  const leave = `<button class="btn ghost" data-action="leave" data-tid="${t.id}">Leave</button>`;
-  if (t.status === 'registration') {
-    if (!e || e.status === 'left') return `<button class="btn primary" data-action="join" data-tid="${t.id}">${icon('plus')} Join tournament</button>`;
-    if (e.status === 'disabled') return entryBadge(e);
-    return entryBadge(e) + leave;
-  }
-  if (t.status === 'in_progress' && e && (e.status === 'verified' || e.status === 'pending')) return entryBadge(e) + leave;
-  return e ? entryBadge(e) : '';
-}
-
-function adminTournamentActions(t, verified) {
-  const start =
-    t.status === 'registration'
-      ? `<button class="btn primary" data-action="start-t" data-tid="${t.id}" ${verified < 2 ? 'disabled title="Verify at least two players first"' : ''}>${icon('play')} Draw bracket</button>`
-      : `<button class="btn ghost" data-action="reset-t" data-tid="${t.id}">${icon('rotate')} Redraw</button>`;
-  return `${start}<button class="icon-btn danger" data-action="delete-t" data-tid="${t.id}" title="Delete tournament" aria-label="Delete tournament">${icon('trash')}</button>`;
-}
-
-function tournamentSettings(t) {
-  return `<details class="card settings" id="settings-${t.id}">
-    <summary>${icon('gear')} Tournament settings</summary>
-    <form data-form="edit-t" data-tid="${t.id}" class="settings-form">
-      <label class="field"><span>Name</span><input id="edit-name" name="name" required maxlength="60" value="${esc(t.name)}"></label>
-      <label class="field"><span>Default match clock (min, 0 = none)</span><input id="edit-timer" name="timerMinutes" type="number" min="0" max="180" step="0.5" value="${t.timerMinutes}"></label>
-      <label class="check"><input id="edit-live" name="liveBalls" type="checkbox" ${t.liveBalls ? 'checked' : ''}><span>Show pocketed balls to players live</span></label>
-      <button class="btn primary" type="submit">Save</button>
-    </form>
-  </details>`;
-}
-
-function championBanner(t) {
-  const name = nameOf(t.championId);
-  return `<div class="champion">
-    <div class="champion-avatar"><span class="crown-float">${CROWN}</span>${avatar(name, 'xl')}</div>
-    <div class="champion-copy"><span class="eyebrow gold">Champion</span><h2>${esc(name)}</h2><p class="muted">Took down ${esc(t.name)}</p></div>
-    <div class="champion-ball" aria-hidden="true">${ball(8, 84)}</div>
-  </div>`;
-}
-
-function nowPlaying(t) {
-  const live = t.matches.filter((m) => m.status === 'live');
-  if (!live.length) return '';
-  const row = (m, s) => {
-    const g = groupOf(m, s);
-    const count = g && m.potted ? GROUPS[g].balls.filter((n) => m.potted.includes(n)).length : null;
-    return `<div class="lt-row">${avatar(nameOf(m[s]), 'sm')}<span class="lt-name">${esc(nameOf(m[s]))}</span>
-      ${g ? `${ball(GROUPS[g].icon, 16)}${count !== null ? `<span class="lt-count">${count}/7</span>` : ''}` : '<span class="muted small">open</span>'}</div>`;
-  };
-  return `<section class="section">
-    <div class="section-head"><h2><span class="live-dot"></span> Now playing</h2></div>
-    <div class="live-grid">${live
-      .map(
-        (m) => `<a class="live-tile" href="#/t/${t.id}/m/${m.id}">
-          <div class="lt-head"><span>${roundName(m.round, t.rounds)} · Match ${matchNumber(t, m)}</span>
-            ${m.timer.durationMs ? `<span class="clock xs" data-timer="${t.id}|${m.id}">${fmt(timeLeft(m))}</span>` : ''}</div>
-          ${row(m, 'a')}${row(m, 'b')}
-        </a>`,
-      )
-      .join('')}</div>
-  </section>`;
-}
-
-function rosterView(t) {
-  if (!t.entries.length) return emptyState('No one has joined yet', 'Players sign in and tap “Join tournament”.', 9);
-  const entries = [...t.entries].sort((a, b) => {
-    const rank = ENTRY_RANK[a.status] - ENTRY_RANK[b.status];
-    if (rank) return rank;
-    return ENTRY_RANK[a.status] === 2 ? a.updatedAt - b.updatedAt : a.joinedAt - b.joinedAt;
-  });
-  return `<div class="roster">${entries.map((e) => rosterItem(t, e)).join('')}</div>`;
-}
-
-function rosterItem(t, e) {
-  const name = nameOf(e.playerId);
-  const me = S.me.player?.id === e.playerId;
-  const fate = playerFate(t, e.playerId);
-  const sub = {
-    pending: 'Awaiting verification',
-    verified: { champion: 'Champion', out: 'Eliminated', alive: 'Still in' }[fate] ?? 'Verified',
-    disabled: 'Disabled by admin',
-    left: 'Left the tournament',
-  }[e.status];
-  return `<div class="roster-item st-${e.status} ${fate === 'out' ? 'is-out' : ''} ${fate === 'champion' ? 'is-champ' : ''}">
-    ${avatar(name)}
-    <div class="r-body">
-      <div class="r-name">${esc(name)}${fate === 'champion' ? CROWN : ''}${me ? '<span class="you">You</span>' : ''}</div>
-      <div class="r-sub"><span class="sdot"></span>${sub}</div>
-    </div>
-    ${isAdmin() ? rosterActions(t, e) : ''}
-  </div>`;
-}
-
-function rosterActions(t, e) {
-  if (t.status === 'completed' || e.status === 'left') return '';
-  const btn = (status, label, cls, ic) =>
-    `<button class="btn sm ${cls}" data-action="entry" data-tid="${t.id}" data-pid="${e.playerId}" data-status="${status}">${icon(ic)} ${label}</button>`;
-  const canVerify = t.status === 'registration' || t.matches.some((m) => m.a === e.playerId || m.b === e.playerId);
-  let html = '';
-  if (e.status === 'pending' && canVerify) html += btn('verified', 'Verify', 'primary', 'check');
-  if (e.status === 'disabled' && canVerify) html += btn('verified', 'Enable', 'ghost', 'check');
-  if (e.status !== 'disabled') html += btn('disabled', 'Disable', 'ghost danger-text', 'ban');
-  return `<div class="r-actions">${html}</div>`;
-}
-
-/* =====================================================================
-   Bracket
-   ===================================================================== */
-
-function bracketView(t) {
-  const rounds = Array.from({ length: t.rounds }, (_, i) => t.matches.filter((m) => m.round === i + 1));
-  return `<div class="bracket-scroll" data-scroll-id="bracket-${t.id}">
-    <div class="bracket">
-      <svg class="bracket-lines" aria-hidden="true"></svg>
-      ${rounds
-        .map(
-          (ms, i) => `<div class="round">
-            <div class="round-title">${roundName(i + 1, t.rounds)}</div>
-            <div class="round-matches">${ms.map((m) => `<div class="match-slot">${matchCard(t, m)}</div>`).join('')}</div>
-          </div>`,
-        )
-        .join('')}
-    </div>
-  </div>`;
-}
-
-function matchCard(t, m) {
-  const isFinal = m.round === t.rounds;
-  const tag = {
-    live: m.timer.durationMs
-      ? `<span class="pill green xs"><span class="live-dot"></span><span data-timer="${t.id}|${m.id}">${fmt(timeLeft(m))}</span></span>`
-      : pill('Live', 'green xs', '<span class="live-dot"></span>'),
-    ready: m.startedAt ? pill('Paused', 'amber xs') : pill('Up next', 'blue xs'),
-    waiting: '',
-    done: { bye: pill('Bye', 'muted xs'), forfeit: pill('Forfeit', 'red xs'), timeout: pill('On time', 'amber xs') }[m.result] ?? '',
-  }[m.status];
-
+function miniTable(e, m) {
   const row = (s) => {
-    const pid = m[s];
-    if (!pid) return `<div class="mc-row tbd"><span class="avatar sm ghost">–</span><span>${m.bye === s ? 'Bye' : 'TBD'}</span></div>`;
-    const name = nameOf(pid);
-    const won = m.winner === s;
-    const lost = Boolean(m.winner) && !won;
-    const champ = won && isFinal;
-    const st = entryOf(t, pid)?.status;
+    const left = ballsLeft(m, s);
     const g = groupOf(m, s);
-    let sub = '';
-    if (g && m.status !== 'done') {
-      const pottedCount = m.potted ? GROUPS[g].balls.filter((n) => m.potted.includes(n)).length : null;
-      const mini = m.potted && m.status === 'live'
-        ? `<span class="mini-balls">${GROUPS[g].balls.map((n) => ball(n, 12, m.potted.includes(n))).join('')}</span>`
-        : '';
-      sub = `<div class="mc-sub">${groupChip(g)}${mini}${pottedCount !== null && !mini ? `<span class="muted">${pottedCount}/7</span>` : ''}</div>`;
-    } else if (m.status === 'live') {
-      sub = '<div class="mc-sub"><span class="chip muted">Open table</span></div>';
-    }
-    return `<div class="mc-row ${won ? 'win' : ''} ${lost ? 'lose' : ''} ${champ ? 'champ' : ''}">
-      ${avatar(name, 'sm')}
-      <div class="mc-info">
-        <div class="mc-name"><span class="truncate">${esc(name)}</span>${champ ? CROWN : ''}${st === 'disabled' || st === 'left' ? `<span class="tag">${st}</span>` : ''}</div>
-        ${sub}
-      </div>
-      <span class="mc-mark">${won ? 'W' : lost ? 'L' : ''}</span>
+    const cls = m.winner === s ? 'win' : m.winner ? 'lose' : '';
+    return `<div class="mt-row ${cls}">
+      ${m[s] ? avatar(teamName(m[s]), 'sm') : '<span class="avatar sm ghost">?</span>'}
+      <div class="mt-who"><span class="mt-name truncate">${esc(slotName(m, s))}</span>
+        ${g ? `<span class="mt-balls">${GROUPS[g].balls.map((n) => matchBall(m, n, 12)).join('')}</span>` : `<span class="mt-sub truncate">${m[s] ? esc(memberLine(m[s])) : ''}</span>`}</div>
+      <span class="mt-left">${m.winner === s ? icon('trophy') : left === null ? '' : `<b>${left}</b><small>left</small>`}</span>
     </div>`;
   };
-
-  return `<a class="match-card st-${m.status} ${m.bye ? 'bye' : ''} ${isFinal ? 'is-final' : ''}" data-mid="${m.id}" href="#/t/${t.id}/m/${m.id}">
-    <div class="mc-head"><span>${isFinal ? 'Final' : `Match ${matchNumber(t, m)}`}</span>${tag}</div>
+  return `<div class="mini-table felt st-${m.status} ${S.fx.finished.has(m.id) ? 'just-won' : ''} ${S.fx.started.has(m.id) ? 'kick' : ''}" data-mid="${m.id}">
+    <div class="mt-head"><span class="mt-num">Table ${m.table}</span><span class="mt-tag">${m.stage === 'group' ? GROUP_NAMES[m.group] : STAGE[m.stage]}</span>${statusTag(m)}</div>
     ${row('a')}${row('b')}
-  </a>`;
+    ${m.potted.includes(8) ? `<span class="mt-eight">${ball(8, 18)}</span>` : ''}
+  </div>`;
 }
 
-/** Draws elbow connectors between each match and the match its winner feeds into. */
-function drawConnectors() {
-  for (const br of document.querySelectorAll('.bracket')) {
-    const svg = br.querySelector('.bracket-lines');
-    const box = br.getBoundingClientRect();
-    const cards = new Map([...br.querySelectorAll('.match-card')].map((c) => [c.dataset.mid, c]));
-    let paths = '';
-    for (const [mid, card] of cards) {
-      const [, r, i] = mid.match(/^r(\d+)m(\d+)$/).map(Number);
-      const next = cards.get(`r${r + 1}m${i >> 1}`);
-      if (!next) continue;
-      const a = card.getBoundingClientRect();
-      const b = next.getBoundingClientRect();
-      const x1 = a.right - box.left;
-      const y1 = a.top + a.height / 2 - box.top;
-      const x2 = b.left - box.left;
-      const y2 = b.top + b.height / 2 - box.top;
-      const mx = (x1 + x2) / 2;
-      paths += `<path class="${card.classList.contains('st-done') ? 'done' : ''}" d="M${x1} ${y1}H${mx}V${y2}H${x2}"/>`;
-    }
-    svg.setAttribute('viewBox', `0 0 ${box.width} ${box.height}`);
-    svg.innerHTML = paths;
+function standingsCard(e, g) {
+  const rows = e.standings[g] ?? [];
+  const body = rows
+    .map((row, i) => {
+      const ko = i === e.advance - 1 ? 'cut' : '';
+      const tb = row.tiebreak ? `<abbr class="tb" title="${row.tiebreak === 'h2h' ? 'Tie broken by head-to-head' : 'Tie broken by ball differential'}">${row.tiebreak === 'h2h' ? 'H2H' : '±'}</abbr>` : '';
+      return `<tr class="${i < e.advance ? 'adv' : ''} ${ko}" data-flip="st-${row.id}">
+        <td class="pos"><span>${row.place}</span></td>
+        <td class="team-cell"><div class="tc-wrap">${avatar(teamName(row.id), 'sm')}<div class="min0"><div class="truncate b">${esc(teamName(row.id))} ${tb}</div><div class="truncate muted xs">${esc(memberLine(row.id))}</div></div></div></td>
+        <td>${row.played}</td><td>${row.wins}</td><td>${row.losses}</td>
+        <td class="${row.diff > 0 ? 'pos-diff' : row.diff < 0 ? 'neg-diff' : ''}">${row.diff > 0 ? '+' : ''}${row.diff}</td>
+        <td class="pts"><b>${row.points}</b></td>
+      </tr>`;
+    })
+    .join('');
+  return `<div class="card standings">
+    <div class="card-head"><h3>${GROUP_NAMES[g]}</h3><span class="muted small">${plural(rows.length, 'team')}</span></div>
+    <div class="table-scroll"><table class="st-table">
+      <thead><tr><th>#</th><th class="left">Team</th><th title="Played">P</th><th title="Won">W</th><th title="Lost">L</th><th title="Ball differential">+/−</th><th>Pts</th></tr></thead>
+      <tbody>${body}</tbody>
+    </table></div>
+  </div>`;
+}
+
+/** Quarterfinals → semifinals → final, filled in as results land. */
+function knockoutView(e) {
+  const cols = ['qf', 'sf', 'final']
+    .map((stage) => {
+      const ms = e.matches.filter((m) => m.stage === stage || (stage === 'final' && m.stage === 'third'));
+      if (!ms.length) return '';
+      return `<div class="ko-col"><div class="ko-title">${stage === 'final' ? 'Finals' : STAGE[stage]}</div>
+        <div class="ko-matches">${ms.map((m) => koCard(m)).join('')}</div></div>`;
+    })
+    .join('');
+  return `<div class="ko-scroll" data-scroll-id="ko"><div class="ko-board">${cols}</div></div>`;
+}
+
+function koCard(m) {
+  const row = (s) => {
+    const cls = m.winner === s ? 'win' : m.winner ? 'lose' : !m[s] ? 'tbd' : '';
+    const champ = m.stage === 'final' && m.winner === s;
+    return `<div class="ko-row ${cls}">${m[s] ? avatar(teamName(m[s]), 'sm') : ''}<span class="truncate">${esc(slotName(m, s))}</span>${champ ? CROWN : m.winner === s ? icon('check') : ''}</div>`;
+  };
+  return `<div class="ko-card st-${m.status} ${m.stage}" data-mid="${m.id}">
+    <div class="ko-head"><span>${m.stage === 'third' ? '3rd place' : m.stage === 'final' ? 'Championship' : shortLabel(m)} · T${m.table}</span>${statusTag(m)}</div>
+    ${row('a')}${row('b')}
+  </div>`;
+}
+
+function leaders(e) {
+  const stats = new Map();
+  const get = (id) => stats.get(id) ?? stats.set(id, { id, wins: 0, cleared: 0, fastest: null }).get(id);
+  let margin = null;
+  for (const m of e.matches) {
+    if (!m.winner) continue;
+    for (const s of ['a', 'b']) get(m[s]).cleared += cleared(m, s);
+    const w = get(m[m.winner]);
+    w.wins += 1;
+    const dur = m.startedAt && m.finishedAt ? m.finishedAt - m.startedAt : null;
+    if (dur && (w.fastest === null || dur < w.fastest)) w.fastest = dur;
+    const diff = cleared(m, m.winner) - cleared(m, other(m.winner));
+    if (!margin || diff > margin.diff) margin = { m, diff };
   }
+  const list = [...stats.values()];
+  if (!list.length) return emptyState('No results yet', 'Leaders show up here once the first matches finish.', 9);
+  const top = (key, fmtValue, asc = false) =>
+    list
+      .filter((x) => x[key] !== null && x[key] > 0)
+      .sort((x, y) => (asc ? x[key] - y[key] : y[key] - x[key]))
+      .slice(0, 3)
+      .map((x, i) => `<li><span class="rank r${i + 1}">${i + 1}</span>${avatar(teamName(x.id), 'sm')}<span class="truncate">${esc(teamName(x.id))}</span><b>${fmtValue(x[key])}</b></li>`)
+      .join('') || '<li class="muted">—</li>';
+  return `<div class="leaders">
+    <div class="card leader"><div class="leader-head">${icon('trophy')}<h3>Most wins</h3></div><ol>${top('wins', (v) => v)}</ol></div>
+    <div class="card leader"><div class="leader-head">${icon('target')}<h3>Balls cleared</h3></div><ol>${top('cleared', (v) => v)}</ol></div>
+    <div class="card leader"><div class="leader-head">${icon('zap')}<h3>Fastest win</h3></div><ol>${top('fastest', fmt, true)}</ol></div>
+    <div class="card leader"><div class="leader-head">${icon('flag')}<h3>Biggest margin</h3></div>
+      ${margin && margin.diff > 0
+        ? `<div class="margin"><b>${esc(teamName(margin.m[margin.m.winner]))}</b><span class="muted small">beat ${esc(teamName(margin.m[other(margin.m.winner)]))} by ${plural(margin.diff, 'ball')}</span></div>`
+        : '<p class="muted small">Track balls to see this.</p>'}</div>
+  </div>`;
 }
 
-/* =====================================================================
-   Match / table view
-   ===================================================================== */
-
-function matchView(tid, mid) {
-  const t = findT(tid);
-  const m = t?.matches.find((x) => x.id === mid);
-  if (!t || !m) return notFound();
-  const statusPill = {
-    live: pill('Live', 'green', '<span class="live-dot"></span>'),
-    ready: m.startedAt ? pill('Paused', 'amber') : pill('Up next', 'blue'),
-    waiting: pill('Waiting for players', 'muted'),
-    done: pill('Final', 'gold'),
-  }[m.status];
-  const next = isAdmin() ? nextMatch(t, m.id) : null;
-  return `
-  <div class="match-nav">
-    <a class="btn ghost" href="#/t/${t.id}">${icon('board')} Board</a>
-    <span class="match-nav-title truncate">${esc(t.name)}</span>
-    ${next ? `<a class="btn primary" href="#/t/${t.id}/m/${next.id}" title="Match ${matchNumber(t, next)}">Next match ${icon('arrowRight')}</a>` : ''}
-  </div>
-  <div class="page-head">
-    <div><div class="title-row"><h1>${roundName(m.round, t.rounds)}<span class="muted"> · Match ${matchNumber(t, m)}</span></h1>${statusPill}</div></div>
-  </div>
-  <div class="table-rail">
-    <i class="pocket p1"></i><i class="pocket p2"></i><i class="pocket p3"></i><i class="pocket p4"></i><i class="pocket p5"></i><i class="pocket p6"></i>
-    <div class="scoreboard felt">
-      ${side(t, m, 'a')}
-      ${center(t, m)}
-      ${side(t, m, 'b')}
+function championBanner(e) {
+  const id = e.championId;
+  if (!id) return '';
+  const final = e.matches.find((m) => m.stage === 'final');
+  const runnerUp = final?.winner ? final[other(final.winner)] : null;
+  const third = e.matches.find((m) => m.stage === 'third' && m.winner);
+  return `<section class="champion anim">
+    <div class="champion-glow"></div>
+    <div class="champion-avatar"><span class="crown-float">${CROWN}</span>${avatar(teamName(id), 'xl')}</div>
+    <div class="champion-copy">
+      <span class="eyebrow gold">Champions</span>
+      <h2>${esc(teamName(id))}</h2>
+      <p class="muted">${esc(memberLine(id))}</p>
+      <div class="podium-line">
+        ${runnerUp ? `<span>${pill('2nd', 'muted xs')} ${esc(teamName(runnerUp))}</span>` : ''}
+        ${third ? `<span>${pill('3rd', 'muted xs')} ${esc(teamName(third[third.winner]))}</span>` : ''}
+      </div>
     </div>
-  </div>
-  ${m.potted ? pottedTray(m) : '<p class="hint centered">Live ball tracking is hidden for this tournament.</p>'}
-  ${isAdmin() && m.a && m.b ? controlPanel(t, m) : ''}
-  ${!m.a || !m.b ? '<p class="hint centered">This match unlocks once both players have won their previous match.</p>' : ''}
-  ${isAdmin() ? `<section class="section"><div class="section-head"><h2>All matches</h2></div>${matchQueue(t, m.id)}</section>` : ''}`;
-}
-
-/** Admin control room: live and ready matches across every running tournament. */
-function tablesNow(ts) {
-  const rows = (status) =>
-    ts.filter((t) => t.status === 'in_progress')
-      .flatMap((t) => t.matches.filter((m) => m.status === status).map((m) => queueRow(t, m, { showTournament: true })));
-  const live = rows('live');
-  const ready = rows('ready');
-  if (!live.length && !ready.length) return '';
-  return `<section class="section">
-    <div class="section-head"><h2>Tables right now</h2></div>
-    <div class="queue two">
-      <div class="q-col"><div class="q-head"><span>Live now</span><span class="q-count">${live.length}</span></div>${live.join('') || '<p class="q-empty">No tables running.</p>'}</div>
-      <div class="q-col"><div class="q-head"><span>Up next</span><span class="q-count">${ready.length}</span></div>${ready.join('') || '<p class="q-empty">Nothing ready to start.</p>'}</div>
-    </div>
+    <div class="champion-ball">${ball(8, 84, false, 'float')}</div>
   </section>`;
 }
 
-/** The match the admin should run next: one that's ready to start, else another live table. */
-function nextMatch(t, currentId) {
-  const rank = { ready: 0, live: 1 };
-  return t.matches.filter((m) => m.id !== currentId && m.status in rank).sort((x, y) => rank[x.status] - rank[y.status])[0] ?? null;
+function historySection() {
+  const h = S.state.history;
+  if (!h.length) return '';
+  return `<section class="section anim">
+    <div class="section-head"><h2>Hall of fame</h2><span class="muted small">${plural(h.length, 'past tournament')}</span></div>
+    <div class="hall">${h
+      .map((x) => `<div class="hall-item">
+        ${CROWN}
+        <div class="min0"><div class="b truncate">${esc(x.podium[0]?.name ?? '—')}</div>
+          <div class="muted xs truncate">${esc(x.podium[0]?.members.join(' & ') ?? '')}</div></div>
+        <div class="hall-meta"><span class="truncate">${esc(x.name)}</span><span>${x.completedAt ? new Date(x.completedAt).toLocaleDateString() : ''}</span></div>
+      </div>`)
+      .join('')}</div>
+  </section>`;
 }
 
-function queueRow(t, m, { currentId, showTournament = false } = {}) {
-  const who = (s) => {
-    if (!m[s]) return `<span class="q-tbd">${m.bye === s ? 'Bye' : 'TBD'}</span>`;
-    const cls = m.winner === s ? 'q-win' : m.winner ? 'q-lose' : '';
-    return `<span class="${cls} truncate">${esc(nameOf(m[s]))}</span>`;
-  };
-  const tag = {
-    live: m.timer.durationMs
-      ? `<span class="pill green xs"><span class="live-dot"></span><span data-timer="${t.id}|${m.id}">${fmt(timeLeft(m))}</span></span>`
-      : pill('Live', 'green xs', '<span class="live-dot"></span>'),
-    ready: m.startedAt ? pill('Paused', 'amber xs') : pill('Ready', 'blue xs'),
-    waiting: '',
-    done: { bye: pill('Bye', 'muted xs'), forfeit: pill('Forfeit', 'red xs'), timeout: pill('On time', 'amber xs') }[m.result] ?? pill('Done', 'muted xs'),
-  }[m.status];
-  return `<a class="q-row st-${m.status} ${m.id === currentId ? 'current' : ''}" href="#/t/${t.id}/m/${m.id}">
-    <span class="q-num">${matchNumber(t, m)}</span>
-    <div class="q-body">
-      <div class="q-players">${who('a')}<span class="q-vs">vs</span>${who('b')}</div>
-      <div class="q-sub">${showTournament ? `${esc(t.name)} · ` : ''}${roundName(m.round, t.rounds)}${m.id === currentId ? ' · <b>you are here</b>' : ''}</div>
+/** Before the start: the teams, the format and the last champions. */
+function setupHome(e) {
+  const teams = S.state.teams;
+  const format = e.preview
+    ? `${plural(teams.length, 'team')} · ${e.rounds} rounds on ${e.tables} tables · about ${Math.round((e.rounds * e.clockMinutes) / 6) / 10} hours`
+    : `${plural(teams.length, 'team')} so far · at least 4 to play`;
+  return `
+  <section class="hero anim">
+    <div class="hero-copy">
+      <span class="eyebrow">Getting ready</span>
+      <h1>${esc(e.name)}<br><span class="grad">Racking up soon.</span></h1>
+      <p class="lead">${format}. Two groups play a round robin, then the top teams go through to the knockout.</p>
+      <div class="hero-actions">
+        <a class="btn primary" href="#/schedule">${icon('grid')} See the schedule</a>
+        <a class="btn ghost" href="#/rules">${icon('book')} House rules</a>
+      </div>
     </div>
-    ${tag}
-  </a>`;
+    <div class="hero-rack" aria-hidden="true">${[[1], [9, 2], [10, 8, 3], [11, 4, 12, 5], [6, 13, 7, 14, 15]]
+      .map((row, i) => `<div class="hr-row" style="--r:${i}">${row.map((n) => ball(n, 46)).join('')}</div>`)
+      .join('')}</div>
+  </section>
+  <section class="section anim">
+    <div class="section-head"><h2>Teams</h2>${isAdmin() ? `<a class="btn ghost sm" href="#/admin">${icon('gear')} Manage teams</a>` : ''}</div>
+    ${teams.length
+      ? `<div class="team-grid">${teams
+          .map((t, i) => {
+            const g = e.preview ? (e.groups[0].includes(t.id) ? 0 : 1) : null;
+            return `<div class="team-card" style="--i:${i}">${avatar(t.name, 'lg')}<div class="min0"><div class="b truncate">${esc(t.name)}</div>
+              <div class="muted small truncate">${esc(memberLine(t.id))}</div></div>${g !== null ? `<span class="pill ${g ? 'blue' : 'green'} xs">G${g + 1}</span>` : ''}</div>`;
+          })
+          .join('')}</div>`
+      : emptyState('No teams yet', 'The admin adds the teams.', 9)}
+  </section>
+  ${historySection()}`;
 }
 
-/** Admin overview of every match in a tournament, grouped by what needs attention. */
-function matchQueue(t, currentId) {
-  const by = (status) => t.matches.filter((m) => m.status === status && !(status === 'done' && m.result === 'bye'));
-  const col = (status, title, empty) => {
-    const list = by(status);
-    return `<div class="q-col">
-      <div class="q-head"><span>${title}</span><span class="q-count">${list.length}</span></div>
-      ${list.length ? list.map((m) => queueRow(t, m, { currentId })).join('') : `<p class="q-empty">${empty}</p>`}
-    </div>`;
-  };
-  const done = by('done');
-  return `<div class="queue">
-    ${col('live', 'Live now', 'No tables running.')}
-    ${col('ready', 'Up next', 'Nothing ready to start.')}
-    ${col('waiting', 'Later', 'Every match has its players.')}
-  </div>
-  ${done.length ? `<details class="q-done" id="q-done-${t.id}"><summary>Finished <span class="q-count">${done.length}</span></summary>
-    <div class="q-done-list">${done.map((m) => queueRow(t, m, { currentId })).join('')}</div></details>` : ''}`;
-}
+/* =====================================================================
+   Schedule grid: rounds × tables, plus who is resting
+   ===================================================================== */
 
-function side(t, m, s) {
-  const pid = m[s];
-  if (!pid) {
-    return `<div class="side vacant"><span class="avatar xl ghost">?</span><div class="side-name">${m.bye === s ? 'Bye' : 'To be decided'}</div></div>`;
+function scheduleView() {
+  const e = E();
+  if (!e.matches.length) {
+    return `<div class="page-head anim"><div><span class="eyebrow">Schedule</span><h1>The night ahead</h1></div></div>
+      ${emptyState('Not enough teams yet', 'The schedule appears once there are at least 4 teams.', 3)}`;
   }
-  const name = nameOf(pid);
-  const won = m.winner === s;
-  const lost = Boolean(m.winner) && !won;
-  const champ = won && m.round === t.rounds;
-  const g = groupOf(m, s);
-  const balls = g ? GROUPS[g].balls : null;
-  const count = balls && m.potted ? balls.filter((n) => m.potted.includes(n)).length : null;
-  const result = won
-    ? pill({ timeout: 'Won on time', forfeit: 'Won by forfeit', bye: 'Advanced' }[m.result] ?? 'Winner', 'green', icon('check'))
-    : lost
-      ? pill(m.result === 'forfeit' ? 'Forfeited' : 'Eliminated', 'red')
-      : '';
-  return `<div class="side side-${s} ${won ? 'won' : ''} ${lost ? 'lost' : ''}">
-    <div class="side-avatar">${champ ? `<span class="crown-float">${CROWN}</span>` : ''}${avatar(name, 'xl')}</div>
-    <div class="side-name">${esc(name)}</div>
-    ${result}
-    <div class="side-group">${g ? groupChip(g) : '<span class="chip">Open table</span>'}</div>
-    ${balls ? `<div class="side-balls">${balls.map((n) => ball(n, 30, m.potted?.includes(n))).join('')}</div>` : ''}
-    ${count !== null ? `<div class="side-count"><b>${count}</b> / 7 pocketed</div>` : ''}
-  </div>`;
-}
+  const cur = e.status === 'live' ? currentRound(e) : null;
+  const tables = Array.from({ length: e.tables }, (_, i) => i + 1);
+  const groupOfTable = (t) => matchAt(1, t)?.group;
+  const head = `<div class="sh corner">Round</div>${tables
+    .map((t) => {
+      const g = groupOfTable(t);
+      return `<div class="sh g${g ?? 'x'}"><b>Table ${t}</b><small>${g === undefined ? 'Knockout' : GROUP_NAMES[g]}</small></div>`;
+    })
+    .join('')}<div class="sh rest"><b>Resting</b><small>Bye</small></div>`;
 
-function center(t, m) {
-  const hasClock = m.timer.durationMs > 0;
-  const left = timeLeft(m);
-  let label = 'ready';
-  if (m.status === 'done') label = 'final';
-  else if (m.timer.running) label = 'running';
-  else if (left < m.timer.durationMs) label = 'paused';
-  return `<div class="center">
-    ${hasClock ? `<div class="clock" data-timer="${t.id}|${m.id}">${fmt(left)}</div><div class="clock-label">${label}</div>` : '<div class="clock-label">No clock</div>'}
-    <div class="eight">${ball(8, 64, m.potted?.includes(8))}</div>
-    <div class="vs">VS</div>
-  </div>`;
-}
-
-function pottedTray(m) {
-  return `<div class="tray">
-    <span class="tray-label">Pocketed</span>
-    <div class="tray-balls">${m.potted.length ? m.potted.map((n) => ball(n, 26)).join('') : '<span class="muted">Nothing down yet</span>'}</div>
-  </div>`;
-}
-
-/** Start / pause / resume / restart — the match's on-the-table state. */
-function matchStateButtons(m) {
-  const touched = m.startedAt || m.potted.length || m.groupA || m.timer.remainingMs < m.timer.durationMs;
-  const restart = touched ? `<button class="btn ghost danger-text" data-action="m-restart">${icon('rotate')} Restart match</button>` : '';
-  if (m.status === 'live') return `<button class="btn ghost" data-action="m-pause">${icon('pause')} Pause match</button>${restart}`;
-  const clock = m.timer.durationMs ? ' & clock' : '';
-  const start = m.startedAt
-    ? `<button class="btn primary" data-action="m-start">${icon('play')} Resume match${clock}</button>`
-    : `<button class="btn primary" data-action="m-start">${icon('play')} Start match${clock}</button>`;
-  return start + restart;
-}
-
-function controlPanel(t, m) {
-  if (m.status === 'done') {
-    const undoable = m.result === 'win' || m.result === 'timeout';
-    const next = nextMatch(t, m.id);
-    let cta;
-    if (next) {
-      cta = `<div class="next-up">
-        <div><span class="eyebrow">Next up · ${next.status === 'ready' ? 'ready to start' : 'in progress'}</span>
-          <h3>Match ${matchNumber(t, next)} · ${esc(nameOf(next.a))} vs ${esc(nameOf(next.b))}</h3>
-          <p class="muted small">${roundName(next.round, t.rounds)}</p></div>
-        <a class="btn primary" href="#/t/${t.id}/m/${next.id}">Go to next match ${icon('arrowRight')}</a>
-      </div>`;
-    } else {
-      cta = `<div class="next-up">
-        <div><span class="eyebrow">${t.status === 'completed' ? 'Tournament finished' : 'Nothing ready yet'}</span>
-          <h3>${t.status === 'completed' ? `${esc(nameOf(t.championId))} is the champion` : 'Waiting on matches still in play'}</h3></div>
-        <a class="btn primary" href="#/t/${t.id}">${icon('board')} Back to the board</a>
-      </div>`;
+  const rows = [];
+  for (let r = 1; r <= e.rounds; r++) {
+    if (r === e.groupRounds + 1) rows.push(`<div class="sched-divider"><span>${icon('trophy')} Knockout</span></div>`);
+    const at = e.startedAt ? ` · ${clockTime(e.startedAt + (r - 1) * e.clockMinutes * 60000)}` : ` · +${(r - 1) * e.clockMinutes} min`;
+    const isCur = r === cur;
+    rows.push(`<div class="sr-label ${isCur ? 'now' : ''}" style="--row:${r}"><b>R${r}</b><small>${roundStage(e, r)}${at}</small>${isCur ? '<span class="now-tag">Now</span>' : ''}</div>`);
+    for (const t of tables) {
+      const m = matchAt(r, t);
+      rows.push(m ? schedCell(e, m, isCur) : `<div class="cell open ${isCur ? 'now' : ''}" style="--row:${r}"><span>Open play</span></div>`);
     }
-    return `<section class="panel"><div class="card panel-done">
-      ${cta}
-      <div class="undo-row"><p class="muted small">${undoable ? 'Made a mistake? You can undo until the next match starts.' : 'Byes and forfeits are applied automatically.'}</p>
-        ${undoable ? `<button class="btn ghost sm" data-action="m-undo">${icon('undo')} Undo result</button>` : ''}</div>
-    </div></section>`;
+    const resting = restingIn(e, r);
+    rows.push(`<div class="cell rest ${isCur ? 'now' : ''}" style="--row:${r}">${resting.length
+      ? resting.map((x) => x.ids.map((id) => `<span class="rest-chip g${x.g}">${esc(teamName(id))}</span>`).join('')).join('')
+      : `<span class="muted xs">${r > e.groupRounds ? '—' : 'Nobody'}</span>`}</div>`);
   }
-  const A = nameOf(m.a);
-  const B = nameOf(m.b);
-  const left = timeLeft(m);
-  const timerBtn = m.timer.running
-    ? `<button class="btn ghost" data-action="m-timer" data-op="pause">${icon('pause')} Pause</button>`
-    : `<button class="btn primary" data-action="m-timer" data-op="start" ${left > 0 ? '' : 'disabled'}>${icon('play')} ${left < m.timer.durationMs ? 'Resume' : 'Start'}</button>`;
-  return `<section class="panel">
-    <div class="panel-title">
-      <div><span class="eyebrow">Admin</span><h2>Table control</h2></div>
-      <div class="btn-row">${matchStateButtons(m)}</div>
+
+  return `
+  <div class="page-head anim">
+    <div><span class="eyebrow">${e.preview ? 'Preview' : 'Schedule'}</span><h1>${esc(e.name)}</h1>
+      <div class="meta-row"><span>${icon('clock')} ${e.rounds} rounds × ${e.clockMinutes} min</span><span>${icon('grid')} ${e.tables} tables</span><span>${icon('users')} ${plural(e.groups.flat().length, 'team')}</span></div></div>
+    <div class="legend"><span class="lg g0">Group 1</span><span class="lg g1">Group 2</span><span class="lg ko">Knockout</span><span class="lg live">Live</span></div>
+  </div>
+  ${e.preview ? `<p class="notice anim">${icon('alert')} This is a preview from the current team list. Groups and order are locked when the admin starts the tournament.</p>` : ''}
+  <div class="sched-scroll anim" data-scroll-id="sched">
+    <div class="sched" style="--tables:${e.tables}">${head}${rows.join('')}</div>
+  </div>`;
+}
+
+function schedCell(e, m, isCur) {
+  const row = (s) => {
+    const cls = m.winner === s ? 'win' : m.winner ? 'lose' : !m[s] ? 'tbd' : '';
+    const left = ballsLeft(m, s);
+    const score = m.winner === s ? icon('check') : m.status !== 'ready' && left !== null && m.status !== 'waiting' ? `<small>${left}</small>` : '';
+    return `<div class="c-team ${cls}"><span class="truncate">${esc(slotName(m, s))}</span>${score}</div>`;
+  };
+  const tone = m.stage === 'group' ? `g${m.group}` : 'ko';
+  const clickable = isAdmin() && !e.preview;
+  return `<${clickable ? 'button type="button"' : 'div'} class="cell match ${tone} st-${m.status} ${isCur ? 'now' : ''} ${S.fx.finished.has(m.id) ? 'just-won' : ''}" style="--row:${m.round}" data-mid="${m.id}" ${clickable ? `data-action="goto-round" data-round="${m.round}" title="Open in the control room"` : ''}>
+    ${m.stage === 'group' ? '' : `<span class="c-stage">${m.stage === 'final' ? `${CROWN} Championship` : m.stage === 'third' ? '3rd place' : shortLabel(m)}</span>`}
+    ${row('a')}<span class="c-vs">vs</span>${row('b')}
+    <div class="c-foot">${statusTag(m)}</div>
+  </${clickable ? 'button' : 'div'}>`;
+}
+
+/* =====================================================================
+   Rules
+   ===================================================================== */
+
+function rulesView() {
+  const e = E();
+  const clock = e.clockMinutes || 15;
+  const rule = (ic, title, body) => `<div class="rule anim"><span class="rule-ic">${icon(ic)}</span><div><h3>${title}</h3><p>${body}</p></div></div>`;
+  return `
+  <div class="page-head anim"><div><span class="eyebrow">House rules</span><h1>8-Ball rules</h1>
+    <p class="lead">Everything you need for the night: how to play, how the clock works and how the tournament is decided.</p></div></div>
+
+  <section class="rules-section">
+    <h2 class="anim">On the table</h2>
+    <div class="rules">
+      ${rule('target', 'Open table after the break', 'The table stays <b>open</b> after the break until a player legally pockets a <b>called</b> ball. That claims stripes or solids for the team.')}
+      ${rule('hand', 'Call your shot', 'Call the ball and the pocket for any shot that is not blatantly obvious. That includes <b>all banks and combinations</b>.')}
+      ${rule('check', 'A legal shot', 'The cue ball must hit <b>your own suit first</b>. After that, any ball must hit a cushion or drop into a pocket. Anything else is a foul.')}
+      ${rule('alert', 'Fouls give ball-in-hand', 'Scratching, hitting the wrong ball first or failing to hit a rail are fouls. The opponent gets the cue ball <b>in hand anywhere</b> on the table.')}
+      ${rule('zap', 'Losing on the 8', 'Any of these is an <b>instant loss</b>: sinking the 8-ball before your suit is cleared, scratching while shooting the 8, or sinking it into an uncalled pocket.')}
     </div>
-    <div class="panel-grid">
-      <div class="card rack-card">
-        <div class="card-head"><h3>Rack</h3><span class="muted small">Tap a ball when it drops · tap again to undo</span></div>
-        <div class="rack felt">${RACK_ROWS.map(
-          (row) => `<div class="rack-row">${row
-            .map((n) => {
-              const inPocket = m.potted.includes(n);
-              return `<button class="ball-btn ${inPocket ? 'in' : ''}" data-action="m-ball" data-ball="${n}" aria-pressed="${inPocket}" title="Ball ${n}">${ball(n, 46)}</button>`;
-            })
-            .join('')}</div>`,
-        ).join('')}</div>
-      </div>
-      <div class="stack">
-        <div class="card">
-          <div class="card-head"><h3>Groups</h3><span class="muted small">${esc(B)} gets the other set</span></div>
-          <div class="seg">
-            <button class="seg-btn ${m.groupA === 'solids' ? 'on' : ''}" data-action="m-groups" data-group="solids">${ball(1, 18)}<span>${esc(A)} · Solids</span></button>
-            <button class="seg-btn ${m.groupA === 'stripes' ? 'on' : ''}" data-action="m-groups" data-group="stripes">${ball(9, 18)}<span>${esc(A)} · Stripes</span></button>
-            <button class="seg-btn ${m.groupA ? '' : 'on'}" data-action="m-groups" data-group="">Open table</button>
-          </div>
-        </div>
-        <div class="card clock-card">
-          <div class="card-head"><h3>Match clock</h3><span class="clock sm" data-timer="${t.id}|${m.id}">${fmt(left)}</span></div>
-          <div class="btn-row">
-            ${timerBtn}
-            <button class="btn ghost" data-action="m-timer" data-op="add" data-minutes="1">${icon('plus')} 1 min</button>
-            <button class="btn ghost" data-action="m-timer" data-op="reset">${icon('rotate')} Reset</button>
-          </div>
-          <form data-form="timer-set" class="inline-form">
-            <input id="timer-min" name="minutes" type="number" min="0" max="180" step="0.5" value="${m.timer.durationMs / 60000}" aria-label="Clock minutes">
-            <span class="muted">min</span>
-            <button class="btn ghost sm" type="submit">Set clock</button>
-          </form>
-          <p class="warn">Time is up — pick the winner below.</p>
-        </div>
-        <div class="card">
-          <div class="card-head"><h3>Declare winner</h3></div>
-          <div class="btn-row winners">
-            <button class="btn win" data-action="m-winner" data-slot="a">${icon('trophy')} <span class="truncate">${esc(A)}</span></button>
-            <button class="btn win" data-action="m-winner" data-slot="b">${icon('trophy')} <span class="truncate">${esc(B)}</span></button>
-          </div>
-        </div>
-      </div>
+  </section>
+
+  <section class="rules-section">
+    <h2 class="anim">The tournament</h2>
+    <div class="format anim">
+      <div class="fmt-step g0"><span class="fmt-k">Rounds 1–5</span><b>Group stage</b><p>10 teams in two groups of five. Each team plays 4 matches and rests once.</p>
+        <div class="fmt-balls">${[1, 2, 3, 4, 5].map((n) => ball(n, 18)).join('')}</div></div>
+      <span class="fmt-arrow">${icon('arrowRight')}</span>
+      <div class="fmt-step ko"><span class="fmt-k">Round 6</span><b>Quarterfinals</b><p>The top 4 of each group cross over: 1st G1 vs 4th G2, and so on.</p></div>
+      <span class="fmt-arrow">${icon('arrowRight')}</span>
+      <div class="fmt-step ko"><span class="fmt-k">Round 7</span><b>Semifinals</b><p>Four teams left, on tables 1 and 2.</p></div>
+      <span class="fmt-arrow">${icon('arrowRight')}</span>
+      <div class="fmt-step gold"><span class="fmt-k">Round 8</span><b>Final</b><p>Championship on table 1 and a 3rd-place match on table 2.</p>${CROWN}</div>
+    </div>
+    <div class="rules">
+      ${rule('clock', `${clock}-minute cap`, `Every match has a strict ${clock}-minute clock. When time runs out, the team with the <b>fewest balls remaining</b> wins. If balls are tied, the current shooter gets <b>one sudden-death shot</b> at the 8-ball to decide it.`)}
+      ${rule('trophy', 'Standings', 'A win is worth <b>1 point</b>. A two-way tie is broken by the <b>head-to-head</b> result. A tie between three or more teams is broken by <b>ball differential</b> across all group matches.')}
+      ${rule('flag', 'Ball differential', 'For each group match: the balls of your suit you cleared (plus the 8 when you win with it) minus your opponent’s. The admin taps every pocketed ball, so it is counted live.')}
+      ${rule('grid', 'The schedule', `${e.rounds || 8} rounds of ${clock} minutes on ${e.tables || 4} tables, about two hours in all. <a href="#/schedule" class="link">See the full grid →</a>`)}
     </div>
   </section>`;
 }
@@ -910,57 +672,249 @@ function controlPanel(t, m) {
 
 function adminView() {
   if (!isAdmin()) {
-    return `<div class="center-wrap"><div class="card auth-card narrow">
+    return `<div class="center-wrap"><div class="card auth-card narrow anim">
       <div class="auth-icon">${icon('shield')}</div>
       <h2>Admin sign in</h2>
-      <p class="muted">Create tournaments, verify players and run the tables.</p>
+      <p class="muted">Manage teams and run the tables.</p>
       <form data-form="admin-login" class="stack">
         <label class="field"><span>Admin password</span><input id="admin-pass" name="password" type="password" required autocomplete="current-password"></label>
         <button class="btn primary block" type="submit">Sign in</button>
       </form>
     </div></div>`;
   }
-  const ts = S.state.tournaments;
-  const pending = ts.flatMap((t) => (t.status === 'registration' ? t.entries.filter((e) => e.status === 'pending').map((e) => ({ t, e })) : []));
+  const e = E();
+  const tab = S.adminTab || (e.status === 'setup' ? 'teams' : 'tables');
+  const tabBtn = (id, label, ic, badge = '') =>
+    `<button class="tab ${tab === id ? 'on' : ''}" data-action="tab" data-tab="${id}" role="tab" aria-selected="${tab === id}">${icon(ic)}<span>${label}</span>${badge}</button>`;
+  const liveCount = e.status === 'live' ? e.matches.filter((m) => m.status === 'live').length : 0;
+  const body = { tables: tablesPanel, teams: teamsPanel, event: eventPanel }[tab](e);
   return `
-  <div class="page-head"><div><span class="eyebrow">Control room</span><h1>Admin</h1></div></div>
-  <div class="admin-grid">
+  <div class="admin-head anim">
+    <div><span class="eyebrow">Control room</span><h1>${esc(e.name)}</h1></div>
+    <div class="tabs" role="tablist">
+      ${tabBtn('tables', 'Tables', 'grid', liveCount ? `<span class="tab-badge">${liveCount}</span>` : '')}
+      ${tabBtn('teams', 'Teams', 'users', `<span class="tab-count">${S.state.teams.length}</span>`)}
+      ${tabBtn('event', 'Tournament', 'gear')}
+    </div>
+  </div>
+  ${body}`;
+}
+
+/* ---------------------------------------------------------------- Teams */
+
+function teamsPanel(e) {
+  const teams = S.state.teams;
+  const setup = e.status === 'setup';
+  const groups = e.groups.length ? e.groups : [teams.map((t) => t.id)];
+  const block = (ids, g) => {
+    const list = ids.map((id) => teams.find((t) => t.id === id)).filter(Boolean);
+    return `<div class="team-block">
+      ${e.groups.length ? `<div class="tb-head g${g}"><span>${GROUP_NAMES[g]}</span><span class="muted xs">${plural(list.length, 'team')}</span></div>` : ''}
+      ${list.map((t) => teamRow(t, teams.indexOf(t), teams.length, setup)).join('')}
+    </div>`;
+  };
+  return `
+  <div class="panel-bar anim">
+    <div class="pb-copy">${setup
+      ? `<b>${plural(teams.length, 'team')}</b><span class="muted small">${e.preview ? `Group 1 gets the first ${e.groups[0].length}, Group 2 the rest. Reorder or shuffle to change the groups.` : 'Add at least 4 teams to build the schedule.'}</span>`
+      : `<b>Teams are locked</b><span class="muted small">The tournament is on. You can still rename teams and players, or disable a player.</span>`}</div>
+    ${setup ? `<div class="btn-row">
+      <button class="btn ghost" data-action="team-shuffle" ${teams.length < 2 ? 'disabled' : ''}>${icon('shuffle')} Shuffle</button>
+      <button class="btn primary" data-action="team-add">${icon('plus')} Add team</button>
+    </div>` : ''}
+  </div>
+  ${teams.length ? `<div class="team-list anim">${groups.map(block).join('')}</div>` : emptyState('No teams yet', 'Add a team for each pair of players. Names can be changed any time.', 9, `<button class="btn primary" data-action="team-add">${icon('plus')} Add the first team</button>`)}
+  ${setup && teams.length ? `<button class="add-row anim" data-action="team-add">${icon('plus')} Add another team</button>` : ''}`;
+}
+
+function teamRow(t, i, total, setup) {
+  const members = t.members
+    .map(
+      (m, k) => `<div class="member ${m.active ? '' : 'off'}">
+        <input class="inline-input" id="mn-${t.id}-${k}" data-edit="member-name" data-id="${t.id}" data-index="${k}" value="${esc(m.name)}" maxlength="24" aria-label="Player ${k + 1} name" autocomplete="off">
+        <label class="mini-switch" title="${m.active ? 'Playing · tap to disable' : 'Disabled · tap to enable'}">
+          <input type="checkbox" data-edit="member-active" data-id="${t.id}" data-index="${k}" ${m.active ? 'checked' : ''} aria-label="${esc(m.name)} is playing"><span class="track"></span>
+        </label>
+      </div>`,
+    )
+    .join('');
+  return `<div class="team-row" data-flip="team-${t.id}">
+    <span class="seed">${i + 1}</span>
+    ${avatar(t.name)}
+    <input class="inline-input team-name" id="tn-${t.id}" data-edit="team-name" data-id="${t.id}" value="${esc(t.name)}" maxlength="24" aria-label="Team name" autocomplete="off">
+    <div class="members">${members}</div>
+    ${setup ? `<div class="row-actions">
+      <button class="icon-btn" data-action="team-move" data-id="${t.id}" data-by="-1" ${i === 0 ? 'disabled' : ''} title="Move up" aria-label="Move up">${icon('arrowUp')}</button>
+      <button class="icon-btn" data-action="team-move" data-id="${t.id}" data-by="1" ${i === total - 1 ? 'disabled' : ''} title="Move down" aria-label="Move down">${icon('arrowDown')}</button>
+      <button class="icon-btn danger" data-action="team-del" data-id="${t.id}" title="Remove team" aria-label="Remove team">${icon('trash')}</button>
+    </div>` : ''}
+  </div>`;
+}
+
+/* ---------------------------------------------------------------- Tournament settings */
+
+function eventPanel(e) {
+  const setup = e.status === 'setup';
+  const teams = S.state.teams.length;
+  const ko = e.preview || !setup ? (e.advance === 4 ? 'quarterfinals, semifinals, final' : 'semifinals, final') : '';
+  const summary = e.preview || !setup
+    ? `<ol class="fmt-list">
+        <li><b>${plural(e.groups.flat().length, 'team')}</b> → Group 1 (${e.groups[0].length}) and Group 2 (${e.groups[1].length})</li>
+        <li><b>${e.groupRounds} group rounds</b> → every team plays everyone in its group once</li>
+        <li><b>Knockout</b> → top ${e.advance} of each group: ${ko}${e.thirdPlace ? ', plus a 3rd-place match' : ''}</li>
+        <li><b>${e.rounds} rounds on ${e.tables} tables</b> → about ${e.rounds * e.clockMinutes} minutes</li>
+      </ol>`
+    : `<p class="muted">Add at least 4 teams to see the format.</p>`;
+  return `
+  <div class="admin-grid anim">
     <div class="card">
-      <div class="card-head"><h3>New tournament</h3></div>
-      <form data-form="create" class="stack">
-        <label class="field"><span>Name</span><input id="new-name" name="name" required maxlength="60" placeholder="Friday Night 8-Ball"></label>
-        <label class="field"><span>Match clock (minutes, 0 = none)</span><input id="new-timer" name="timerMinutes" type="number" min="0" max="180" step="0.5" value="10"></label>
-        <label class="check"><input id="new-live" name="liveBalls" type="checkbox" checked><span>Show pocketed balls to players live</span></label>
-        <button class="btn primary" type="submit">${icon('plus')} Create tournament</button>
+      <div class="card-head"><h3>Settings</h3></div>
+      <form data-form="event" class="stack">
+        <label class="field"><span>Tournament name</span><input id="ev-name" name="name" required maxlength="60" value="${esc(e.name)}"></label>
+        <label class="field"><span>Match clock (minutes, 0 = none)</span><input id="ev-clock" name="clockMinutes" type="number" min="0" max="180" step="0.5" value="${e.clockMinutes}"></label>
+        <label class="switch ${setup ? '' : 'disabled'}">
+          <input id="ev-third" name="thirdPlace" type="checkbox" ${e.thirdPlace ? 'checked' : ''} ${setup ? '' : 'disabled'}>
+          <span class="track"></span>
+          <span><b>3rd-place match</b><br><span class="muted small">Played on table 2 next to the final.${setup ? '' : ' Locked once started.'}</span></span>
+        </label>
+        <button class="btn primary" type="submit">${icon('check')} Save</button>
       </form>
     </div>
     <div class="card">
-      <div class="card-head"><h3>Waiting for verification</h3><span class="count">${pending.length}</span></div>
-      ${pending.length
-        ? `<div class="mini-list">${pending
-            .map(
-              ({ t, e }) => `<div class="mini-item">${avatar(nameOf(e.playerId), 'sm')}
-                <div class="r-body"><div class="r-name">${esc(nameOf(e.playerId))}</div><div class="r-sub">${esc(t.name)}</div></div>
-                <button class="btn sm primary" data-action="entry" data-tid="${t.id}" data-pid="${e.playerId}" data-status="verified">${icon('check')} Verify</button>
-              </div>`,
-            )
-            .join('')}</div>`
-        : '<p class="muted">All caught up.</p>'}
+      <div class="card-head"><h3>Format</h3>${e.status === 'live' ? livePill('Running') : e.status === 'done' ? pill('Finished', 'gold') : pill('Setup', 'blue')}</div>
+      ${summary}
+      <div class="btn-row mt">
+        ${setup
+          ? `<button class="btn primary big" data-action="event-start" ${teams < 4 ? 'disabled' : ''}>${icon('play')} Start tournament</button>`
+          : `<button class="btn ghost danger-text" data-action="event-reset">${icon('rotate')} ${e.status === 'done' ? 'New tournament' : 'Reset tournament'}</button>`}
+      </div>
     </div>
-    <div class="card">
-      <div class="card-head"><h3>Sign-in settings</h3></div>
-      <label class="switch">
-        <input type="checkbox" data-change="require-pin" ${S.state.settings.requirePin ? 'checked' : ''}>
-        <span class="track"></span>
-        <span><b>Require a PIN</b><br><span class="muted small">When off, players sign in with just their name — faster, but anyone could sign in as anyone.</span></span>
-      </label>
+  </div>`;
+}
+
+/* ---------------------------------------------------------------- Tables (control room) */
+
+function selectedRound(e) {
+  return S.adminRound && S.adminRound <= e.rounds ? S.adminRound : currentRound(e);
+}
+
+function tablesPanel(e) {
+  if (e.status === 'setup') {
+    return emptyState('The tournament has not started', 'Add teams, then start it to get the tables going.', 3, `<button class="btn primary" data-action="tab" data-tab="event">${icon('play')} Go to start</button>`);
+  }
+  const r = selectedRound(e);
+  const cur = currentRound(e);
+  const cards = [];
+  for (let t = 1; t <= e.tables; t++) {
+    const m = matchAt(r, t);
+    cards.push(m ? tableCard(e, m) : `<div class="tcard open"><span class="tc-num">${t}</span><span class="muted">Open play</span></div>`);
+  }
+  const resting = restingIn(e, r);
+  return `
+  ${e.status === 'done' ? championBanner(e) : ''}
+  ${roundBar(e, r, cur)}
+  <div class="tcards">${cards.join('')}</div>
+  ${resting.length ? `<p class="resting-line">${icon('pause')} Resting this round: ${resting.map((x) => x.ids.map((id) => `<span class="rest-chip g${x.g}">${esc(teamName(id))}</span>`).join('')).join('')}</p>` : ''}`;
+}
+
+function roundBar(e, r, cur) {
+  const chips = [];
+  for (let i = 1; i <= e.rounds; i++) {
+    const ms = e.matches.filter((m) => m.round === i);
+    const st = ms.every((m) => m.winner) ? 'done' : ms.some((m) => m.status === 'live') ? 'live' : '';
+    chips.push(`<button class="rchip ${st} ${i === r ? 'on' : ''} ${i > e.groupRounds ? 'ko' : ''}" data-action="pick-round" data-round="${i}" title="${roundStage(e, i)}">${i}</button>`);
+  }
+  const playable = e.matches.filter((m) => m.round === r && m.a && m.b && !m.winner);
+  const live = playable.filter((m) => m.live);
+  const idle = playable.filter((m) => !m.live);
+  const anyStarted = idle.some((m) => m.startedAt);
+  const longest = live.reduce((max, m) => (m.timer.durationMs && timeLeft(m) > (max ? timeLeft(max) : -1) ? m : max), null);
+  return `<div class="roundbar anim">
+    <div class="rb-top">
+      <div class="rb-title"><span class="eyebrow">${roundStage(e, r)}</span><h2>${roundTitle(e, r)} <span class="muted">of ${e.rounds}</span></h2></div>
+      <div class="rchips" aria-label="Rounds">${chips.join('')}</div>
     </div>
-  </div>
-  ${tablesNow(ts)}
-  <section class="section">
-    <div class="section-head"><h2>All tournaments</h2></div>
-    ${ts.length ? `<div class="t-grid">${ts.map(tournamentCard).join('')}</div>` : emptyState('No tournaments yet', 'Create your first one above.')}
-  </section>`;
+    <div class="rb-bottom">
+      <div class="rb-status">
+        ${longest ? `<span class="clock md" data-timer="${longest.id}">${fmt(timeLeft(longest))}</span>` : ''}
+        <span class="muted small">${playable.length ? `${live.length} of ${plural(playable.length, 'table')} live` : e.matches.filter((m) => m.round === r).every((m) => m.winner) ? 'Round complete' : 'Waiting for earlier results'}</span>
+        ${r !== cur ? `<button class="btn ghost sm" data-action="pick-round" data-round="">${icon('arrowRight')} Back to round ${cur}</button>` : ''}
+      </div>
+      <div class="btn-row">
+        <button class="btn primary" data-action="round" data-type="start" data-round="${r}" ${idle.length ? '' : 'disabled'}>${icon('play')} ${!idle.length ? 'All running' : `${anyStarted ? 'Resume' : 'Start'} ${idle.length > 1 || !live.length ? 'all tables' : 'table'}`}</button>
+        <button class="btn ghost" data-action="round" data-type="pause" data-round="${r}" ${live.length ? '' : 'disabled'}>${icon('pause')} Pause all</button>
+        <button class="btn ghost" data-action="round" data-type="add" data-round="${r}" ${playable.length ? '' : 'disabled'}>${icon('plus')} 1 min all</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function tableCard(e, m) {
+  const head = `<header class="tc-head">
+    <span class="tc-num">${m.table}</span>
+    <div class="tc-title"><b>Table ${m.table}</b><small>${m.stage === 'group' ? GROUP_NAMES[m.group] : STAGE[m.stage]}</small></div>
+    ${m.status === 'live' && m.timer.durationMs ? livePill() : statusTag(m, '')}
+    ${m.timer.durationMs ? `<span class="clock sm tc-clock" data-timer="${m.id}">${fmt(timeLeft(m))}</span>` : ''}
+  </header>`;
+  const fx = `${S.fx.finished.has(m.id) ? 'just-won' : ''} ${S.fx.started.has(m.id) ? 'kick' : ''}`;
+
+  if (m.status === 'waiting') {
+    return `<article class="tcard st-waiting" data-mid="${m.id}">${head}
+      <div class="tc-wait"><span>${esc(slotName(m, 'a'))}</span><span class="c-vs">vs</span><span>${esc(slotName(m, 'b'))}</span></div>
+      <p class="muted small center-text">Unlocks when the earlier results are in.</p></article>`;
+  }
+
+  const teamRowHtml = (s) => {
+    const left = ballsLeft(m, s);
+    const g = groupOf(m, s);
+    const cls = m.winner === s ? 'win' : m.winner ? 'lose' : '';
+    return `<div class="tc-team ${cls}">
+      ${avatar(teamName(m[s]))}
+      <div class="min0"><div class="tc-name truncate">${esc(teamName(m[s]))}</div><div class="muted xs truncate">${esc(memberLine(m[s]))}</div></div>
+      ${g ? groupChip(g) : ''}
+      <div class="tc-left">${m.winner === s ? `<span class="tc-trophy">${icon('trophy')}</span>` : left === null ? '<b>–</b>' : `<b>${left}</b>`}<small>${m.winner === s ? 'winner' : 'left'}</small></div>
+    </div>`;
+  };
+
+  if (m.status === 'done') {
+    return `<article class="tcard st-done ${fx}" data-mid="${m.id}">${head}
+      ${teamRowHtml('a')}${teamRowHtml('b')}
+      <div class="tc-actions"><span class="muted small">${m.result === 'timeout' ? 'Decided on time' : 'Match over'} · ${m.potted.length} balls down</span>
+        <button class="btn ghost sm" data-action="m" data-type="undo" data-id="${m.id}">${icon('undo')} Undo</button></div>
+    </article>`;
+  }
+
+  const A = teamName(m.a);
+  const rackGroup = (balls, g) => `<div class="tc-set">${balls.map((n) => `<button class="ball-btn ${m.potted.includes(n) ? 'in' : ''}" data-action="m" data-type="ball" data-id="${m.id}" data-ball="${n}" aria-pressed="${m.potted.includes(n)}" title="Ball ${n}">${matchBall(m, n, 30)}</button>`).join('')}${g ? `<span class="set-owner">${esc(teamName(m[g]))}</span>` : ''}</div>`;
+  const ownerOf = (group) => (m.groupA ? (m.groupA === group ? 'a' : 'b') : null);
+  const live = m.status === 'live';
+  return `<article class="tcard st-${m.status} ${fx}" data-mid="${m.id}">${head}
+    ${teamRowHtml('a')}${teamRowHtml('b')}
+    <div class="tc-groups">
+      <button class="seg-btn ${m.groupA === 'solids' ? 'on' : ''}" data-action="m" data-type="groups" data-id="${m.id}" data-group="solids">${ball(1, 16)}<span class="truncate">${esc(A)}: Solids</span></button>
+      <button class="seg-btn ${m.groupA ? '' : 'on'}" data-action="m" data-type="groups" data-id="${m.id}" data-group="">Open</button>
+      <button class="seg-btn ${m.groupA === 'stripes' ? 'on' : ''}" data-action="m" data-type="groups" data-id="${m.id}" data-group="stripes">${ball(9, 16)}<span class="truncate">${esc(A)}: Stripes</span></button>
+    </div>
+    <div class="tc-rack felt">
+      ${rackGroup(SOLIDS, ownerOf('solids'))}
+      <button class="ball-btn eight-btn ${m.potted.includes(8) ? 'in' : ''}" data-action="m" data-type="ball" data-id="${m.id}" data-ball="8" aria-pressed="${m.potted.includes(8)}" title="8-ball">${matchBall(m, 8, 40)}</button>
+      ${rackGroup(STRIPES, ownerOf('stripes'))}
+    </div>
+    <div class="tc-actions">
+      <div class="btn-row">
+        ${live
+          ? `<button class="btn ghost sm" data-action="m" data-type="pause" data-id="${m.id}">${icon('pause')} Pause</button>`
+          : `<button class="btn primary sm" data-action="m" data-type="start" data-id="${m.id}">${icon('play')} ${m.startedAt ? 'Resume' : 'Start'}</button>`}
+        <button class="btn ghost sm" data-action="m" data-type="add" data-id="${m.id}" title="Add a minute">${icon('plus')} 1</button>
+        <button class="icon-btn" data-action="m-more" data-id="${m.id}" title="More" aria-label="More options">${icon('gear')}</button>
+      </div>
+      <div class="btn-row winners">
+        <button class="btn win sm" data-action="m-winner" data-id="${m.id}" data-slot="a">${icon('trophy')}<span class="truncate">${esc(A)}</span></button>
+        <button class="btn win sm" data-action="m-winner" data-id="${m.id}" data-slot="b">${icon('trophy')}<span class="truncate">${esc(teamName(m.b))}</span></button>
+      </div>
+    </div>
+    <p class="tc-warn">${icon('clock')} Time's up. Fewest balls left wins.</p>
+  </article>`;
 }
 
 /* =====================================================================
@@ -985,6 +939,11 @@ $modal.addEventListener('click', (e) => {
   if (choice) S.modal.onChoice(choice.dataset.choice);
 });
 
+$modal.addEventListener('submit', (e) => {
+  e.preventDefault();
+  S.modal?.onSubmit?.(new FormData(e.target));
+});
+
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && S.modal) S.modal.onDismiss?.();
 });
@@ -1006,58 +965,183 @@ function confirmDialog({ title, body, confirmLabel = 'Confirm', danger = false }
   });
 }
 
-/** Admin-only: pops up wherever they are when a running match clock hits zero. */
+/** Two big team buttons plus extra options. Resolves with 'a', 'b', an extra's key, or null. */
+function pickTeamDialog(m, { title, body, extras = [], kind = 'dialog', iconName = 'trophy' }) {
+  return new Promise((resolve) => {
+    const done = (c) => {
+      closeModal();
+      resolve(c);
+    };
+    const choice = (s) => {
+      const left = ballsLeft(m, s);
+      return `<button class="choice" data-choice="${s}">${avatar(teamName(m[s]), 'lg')}<span>${esc(teamName(m[s]))}</span>${left !== null ? `<small class="muted">${plural(left, 'ball')} left</small>` : ''}</button>`;
+    };
+    openModal(
+      `<div class="modal-icon ${kind}">${icon(iconName)}</div>
+       <h2>${esc(title)}</h2><p class="muted">${body}</p>
+       <div class="timeup-choices">${choice('a')}${choice('b')}</div>
+       <div class="modal-actions">${extras.map(([key, label]) => `<button class="btn ghost" data-choice="${key}">${label}</button>`).join('')}</div>`,
+      { kind: `pick ${kind}`, mid: m.id, onChoice: done, onDismiss: () => done(null) },
+    );
+  });
+}
+
+/** Who is ahead on balls, for the time-up call. */
+function ballVerdict(m) {
+  const a = ballsLeft(m, 'a');
+  const b = ballsLeft(m, 'b');
+  if (a === null) return 'The table is still open, so balls are level: the current shooter gets one sudden-death shot at the 8.';
+  if (a === b) return `Balls are tied at ${a} each: the current shooter gets one sudden-death shot at the 8.`;
+  const lead = a < b ? 'a' : 'b';
+  return `<b>${esc(teamName(m[lead]))}</b> has fewer balls left (${Math.min(a, b)} vs ${Math.max(a, b)}).`;
+}
+
+/** Admin only: pops up wherever they are when a running match clock hits zero. */
 function checkTimeouts() {
-  if (!isAdmin() || S.modal || !S.state) return;
-  for (const t of S.state.tournaments) {
-    for (const m of t.matches) {
-      if (!isExpired(m)) continue;
-      const key = `${t.id}/${m.id}/${m.timer.endsAt}`;
-      if (S.acked.has(key)) continue;
-      return showTimeUp(t, m, key);
-    }
+  if (!isAdmin() || S.modal || !S.state || S.state.event.status !== 'live') return;
+  for (const m of E().matches) {
+    if (!isExpired(m)) continue;
+    const key = `${m.id}/${m.timer.endsAt}`;
+    if (S.acked.has(key)) continue;
+    S.acked.add(key);
+    return showTimeUp(m);
   }
 }
 
-function showTimeUp(t, m, key) {
-  const A = nameOf(m.a);
-  const B = nameOf(m.b);
-  const ack = () => {
-    S.acked.add(key);
-    closeModal();
-  };
+async function showTimeUp(m) {
   beep();
+  const c = await pickTeamDialog(m, {
+    title: `Time's up on table ${m.table}`,
+    body: ballVerdict(m),
+    kind: 'timeup',
+    iconName: 'clock',
+    extras: [['later', 'Decide later'], ['extend', `${icon('plus')} 2 more minutes`]],
+  });
+  if (c === 'a' || c === 'b') await run(() => act(m.id, { type: 'winner', slot: c, reason: 'timeout' }));
+  if (c === 'extend') await run(() => act(m.id, { type: 'timer', op: 'add', minutes: 2 }));
+}
+
+/** Closes a pick-a-team popup that was resolved somewhere else (other tab, other admin). */
+function syncModal() {
+  if (!S.modal?.mid) return;
+  const m = findMatch(S.modal.mid);
+  if (!m || m.winner) closeModal();
+}
+
+function moreDialog(m) {
   openModal(
-    `<div class="timeup-icon">${icon('clock')}</div>
-     <h2>Time's up!</h2>
-     <p class="muted">${esc(t.name)} · ${roundName(m.round, t.rounds)}, match ${matchNumber(t, m)}. Who takes it?</p>
-     <div class="timeup-choices">
-       <button class="choice" data-choice="a">${avatar(A, 'lg')}<span>${esc(A)}</span></button>
-       <button class="choice" data-choice="b">${avatar(B, 'lg')}<span>${esc(B)}</span></button>
+    `<h2>Table ${m.table}</h2><p class="muted">${esc(teamName(m.a))} vs ${esc(teamName(m.b))}</p>
+     <form class="inline-form" data-modal-form>
+       <label class="field grow"><span>Match clock (minutes)</span><input name="minutes" type="number" min="0" max="180" step="0.5" value="${m.timer.durationMs / 60000}"></label>
+       <button class="btn ghost" type="submit">Set clock</button>
+     </form>
+     <div class="modal-list">
+       <button class="btn ghost block" data-choice="reset">${icon('rotate')} Reset clock to full time</button>
+       <button class="btn ghost block danger-text" data-choice="restart">${icon('undo')} Restart match (clears balls and groups)</button>
      </div>
-     <div class="modal-actions">
-       <button class="btn ghost" data-choice="later">Decide later</button>
-       <button class="btn ghost" data-choice="extend">${icon('plus')} 2 more minutes</button>
-     </div>`,
+     <div class="modal-actions"><button class="btn ghost" data-choice="close">Close</button></div>`,
     {
-      kind: 'timeup',
-      tid: t.id,
       mid: m.id,
-      onDismiss: ack,
-      onChoice: (c) => {
-        ack();
-        if (c === 'a' || c === 'b') run(() => act(t.id, m.id, { type: 'winner', slot: c, reason: 'timeout' }));
-        if (c === 'extend') run(() => act(t.id, m.id, { type: 'timer', op: 'add', minutes: 2 }));
+      onDismiss: closeModal,
+      onSubmit: (data) => {
+        closeModal();
+        run(() => act(m.id, { type: 'timer', op: 'set', minutes: Number(data.get('minutes')) }));
+      },
+      onChoice: async (c) => {
+        closeModal();
+        if (c === 'reset') return run(() => act(m.id, { type: 'timer', op: 'reset' }));
+        if (c === 'restart') {
+          const ok = await confirmDialog({ title: 'Restart this match?', body: 'Pocketed balls and groups are cleared and the clock goes back to full time.', confirmLabel: 'Restart', danger: true });
+          if (ok) run(() => act(m.id, { type: 'restart' }));
+        }
       },
     },
   );
 }
 
-/** Closes a time-up alert that someone else already resolved (other tab, other admin). */
-function syncModal() {
-  if (S.modal?.kind !== 'timeup') return;
-  const m = findMatch(S.modal.tid, S.modal.mid);
-  if (!m || !isExpired(m)) closeModal();
+/* =====================================================================
+   Animation helpers
+   ===================================================================== */
+
+/** Works out what changed between two snapshots, so only that animates. */
+function diffState(prev, next) {
+  const fx = emptyFx();
+  if (!prev) return fx;
+  const before = new Map(prev.event.matches.map((m) => [m.id, m]));
+  for (const m of next.event.matches) {
+    const p = before.get(m.id);
+    if (!p) continue;
+    m.potted.filter((n) => !p.potted.includes(n)).forEach((n) => fx.potted.add(`${m.id}:${n}`));
+    p.potted.filter((n) => !m.potted.includes(n)).forEach((n) => fx.unpotted.add(`${m.id}:${n}`));
+    if (m.winner && !p.winner) fx.finished.add(m.id);
+    if (m.status === 'live' && p.status !== 'live') fx.started.add(m.id);
+  }
+  fx.champion = Boolean(next.event.championId && !prev.event.championId);
+  return fx;
+}
+
+function captureFlip() {
+  if (REDUCED_MOTION) return null;
+  return new Map([...$app.querySelectorAll('[data-flip]')].map((el) => [el.dataset.flip, el.getBoundingClientRect().top]));
+}
+
+/** FLIP: rows that moved slide from where they were to where they are now. */
+function playFlip(before) {
+  if (!before) return;
+  for (const el of $app.querySelectorAll('[data-flip]')) {
+    const top = before.get(el.dataset.flip);
+    if (top === undefined) continue;
+    const dy = top - el.getBoundingClientRect().top;
+    if (Math.abs(dy) < 2) continue;
+    el.animate([{ transform: `translateY(${dy}px)` }, { transform: 'none' }], { duration: 500, easing: 'cubic-bezier(.2,.8,.2,1)' });
+  }
+}
+
+/** Counters roll from their last value to the new one. */
+function playCounters(entering) {
+  for (const el of $app.querySelectorAll('[data-count]')) {
+    const key = el.dataset.count;
+    const to = Number(el.textContent);
+    const from = entering ? 0 : (S.counts.get(key) ?? to);
+    S.counts.set(key, to);
+    if (from === to || REDUCED_MOTION) continue;
+    const start = performance.now();
+    const step = (t) => {
+      const k = Math.min(1, (t - start) / 700);
+      el.textContent = Math.round(from + (to - from) * (1 - (1 - k) ** 3));
+      if (k < 1 && el.isConnected) requestAnimationFrame(step);
+    };
+    el.textContent = from;
+    requestAnimationFrame(step);
+  }
+}
+
+function confetti(x, y, { count = 36, spread = 1, colors = ['#2fd59a', '#f7c548', '#6aa8ff', '#f26b6b', '#ffffff'] } = {}) {
+  if (REDUCED_MOTION) return;
+  const layer = document.createElement('div');
+  layer.className = 'confetti';
+  for (let i = 0; i < count; i++) {
+    const p = document.createElement('i');
+    const angle = Math.random() * Math.PI * 2;
+    const dist = (60 + Math.random() * 140) * spread;
+    p.style.cssText = `left:${x}px;top:${y}px;--dx:${Math.cos(angle) * dist}px;--dy:${Math.sin(angle) * dist - 60 * spread}px;--rot:${Math.random() * 720 - 360}deg;background:${colors[i % colors.length]};animation-delay:${Math.random() * 80}ms`;
+    layer.append(p);
+  }
+  document.body.append(layer);
+  setTimeout(() => layer.remove(), 1800);
+}
+
+function playCelebrations(fx) {
+  for (const id of fx.finished) {
+    const el = $app.querySelector(`[data-mid="${id}"]`);
+    if (!el) continue;
+    const r = el.getBoundingClientRect();
+    if (r.bottom < 0 || r.top > innerHeight) continue;
+    confetti(r.left + r.width / 2, r.top + r.height / 2, { count: 28 });
+  }
+  if (fx.champion) {
+    for (let i = 0; i < 5; i++) setTimeout(() => confetti(innerWidth * (0.15 + i * 0.175), innerHeight * 0.3, { count: 50, spread: 1.6 }), i * 180);
+  }
 }
 
 /* =====================================================================
@@ -1065,29 +1149,25 @@ function syncModal() {
    ===================================================================== */
 
 function route() {
-  const parts = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean);
-  if (parts[0] === 'admin') return { name: 'admin' };
-  if (parts[0] === 't' && parts[1]) {
-    return parts[2] === 'm' && parts[3] ? { name: 'match', tid: parts[1], mid: parts[3] } : { name: 'tournament', tid: parts[1] };
-  }
-  return { name: 'home' };
+  const name = location.hash.replace(/^#\/?/, '').split(/[/?]/)[0];
+  return { name: ['schedule', 'rules', 'admin'].includes(name) ? name : 'home' };
 }
 
 function view(r) {
   if (!S.state) return '<div class="loading">' + ball(8, 48) + '<span>Racking up…</span></div>';
   if (r.name === 'admin') return adminView();
-  if (r.name === 'tournament') return tournamentView(r.tid);
-  if (r.name === 'match') return matchView(r.tid, r.mid);
+  if (r.name === 'schedule') return scheduleView();
+  if (r.name === 'rules') return rulesView();
   return homeView();
 }
 
-/** Live updates re-render the page; keep what the user is typing, focus, open panels and scroll. */
+/** Live updates re-render the page; keep what the admin is typing, focus, open panels and scroll. */
 function captureUi() {
   const fields = [...$app.querySelectorAll('form[data-form] [id]')].map((el) => ({ id: el.id, value: el.value, checked: el.checked }));
   const active = document.activeElement;
   let focus = null;
   if (active?.id && $app.contains(active)) {
-    focus = { id: active.id };
+    focus = { id: active.id, value: active.value };
     try {
       focus.start = active.selectionStart;
       focus.end = active.selectionEnd;
@@ -1114,6 +1194,7 @@ function restoreUi({ fields, focus, open, scroll }) {
   }
   const el = focus && document.getElementById(focus.id);
   if (el) {
+    if (el.matches('input:not([type=checkbox])') && focus.value !== undefined) el.value = focus.value;
     el.focus({ preventScroll: true });
     try {
       if (focus.start != null) el.setSelectionRange(focus.start, focus.end);
@@ -1125,12 +1206,35 @@ function restoreUi({ fields, focus, open, scroll }) {
 
 function render() {
   const r = route();
-  const snapshot = S.renderedKey === location.hash ? captureUi() : null;
+  const entering = S.renderedKey !== location.hash;
+  const snapshot = entering ? null : captureUi();
+  const flip = entering ? null : captureFlip();
   $nav.innerHTML = navView(r);
   $app.innerHTML = view(r);
   if (snapshot) restoreUi(snapshot);
-  S.renderedKey = location.hash;
-  drawConnectors();
+  S.renderedKey = S.state ? location.hash : null; // the loading screen doesn't count as having entered
+
+  if (entering && !REDUCED_MOTION) {
+    $app.querySelectorAll('.anim').forEach((el, i) => {
+      el.style.setProperty('--i', Math.min(i, 10));
+      el.classList.add('in');
+    });
+  }
+  playFlip(flip);
+  playCounters(entering);
+  const fx = S.fx;
+  S.fx = emptyFx(); // play each change once
+  playCelebrations(fx);
+
+  if (S.focusAfter) {
+    const el = document.getElementById(S.focusAfter);
+    if (el) {
+      S.focusAfter = null;
+      el.focus();
+      el.select?.();
+      el.scrollIntoView({ block: 'center', behavior: REDUCED_MOTION ? 'auto' : 'smooth' });
+    }
+  }
   syncModal();
   tick();
 }
@@ -1138,13 +1242,13 @@ function render() {
 function tick() {
   if (!S.state) return;
   for (const el of document.querySelectorAll('[data-timer]')) {
-    const [tid, mid] = el.dataset.timer.split('|');
-    const m = findMatch(tid, mid);
+    const m = findMatch(el.dataset.timer);
     if (!m) continue;
     const left = timeLeft(m);
     el.textContent = fmt(left);
     el.classList.toggle('low', m.status === 'live' && m.timer.running && left > 0 && left <= 60000);
     el.classList.toggle('expired', isExpired(m));
+    el.closest('.tcard')?.classList.toggle('expired', isExpired(m));
   }
   checkTimeouts();
 }
@@ -1155,214 +1259,185 @@ function tick() {
 
 document.addEventListener('click', (e) => {
   const el = e.target.closest('[data-action]');
-  if (!el || el.disabled) return;
+  if (!el || el.disabled || !document.body.contains(el) || $modal.contains(el)) return;
   e.preventDefault();
   run(() => onAction(el.dataset.action, el.dataset));
 });
 
 async function onAction(action, d) {
-  const r = route();
+  const e = S.state?.event;
   switch (action) {
-    case 'auth-back':
-      S.auth = { ctx: S.auth.ctx, step: 'name', name: S.auth.name };
-      render();
-      return document.getElementById('auth-name')?.select();
     case 'logout':
       await api('POST', '/api/logout').catch(() => {});
       setSession(null, { role: null });
-      location.hash = '#/';
       return toast('Signed out');
-    case 'join':
-      await api('POST', `/api/tournaments/${d.tid}/join`);
-      return toast("You're in! The admin will verify you shortly.", 'success');
-    case 'leave': {
-      const live = findT(d.tid)?.status === 'in_progress';
-      const ok = await confirmDialog({
-        title: 'Leave this tournament?',
-        body: live ? 'You will forfeit any match you have not finished.' : 'You can rejoin while registration is open.',
-        confirmLabel: 'Leave',
-        danger: true,
-      });
-      if (!ok) return;
-      await api('POST', `/api/tournaments/${d.tid}/leave`);
-      return toast('You left the tournament');
-    }
-    case 'entry': {
-      if (d.status === 'disabled' && findT(d.tid)?.status === 'in_progress') {
-        const ok = await confirmDialog({
-          title: `Disable ${nameOf(d.pid)}?`,
-          body: 'They forfeit their current or next match and drop to the bottom of the board.',
-          confirmLabel: 'Disable',
-          danger: true,
-        });
-        if (!ok) return;
-      }
-      return api('POST', `/api/tournaments/${d.tid}/entries/${d.pid}`, { status: d.status });
-    }
-    case 'start-t': {
-      const n = findT(d.tid).entries.filter((e) => e.status === 'verified').length;
-      const ok = await confirmDialog({
-        title: 'Draw the bracket?',
-        body: `${n} verified players will be seeded at random. Registration closes and unverified players stay out.`,
-        confirmLabel: 'Draw bracket',
-      });
-      if (!ok) return;
-      await api('POST', `/api/tournaments/${d.tid}/start`);
-      return toast('Bracket drawn — game on!', 'success');
-    }
-    case 'reset-t': {
-      const ok = await confirmDialog({
-        title: 'Redraw the bracket?',
-        body: 'Every match result is wiped and registration reopens. Players keep their verification.',
-        confirmLabel: 'Wipe & reopen',
-        danger: true,
-      });
-      if (ok) await api('POST', `/api/tournaments/${d.tid}/reset`);
+    case 'tab':
+      S.adminTab = d.tab;
+      writeStored('pm_tab', d.tab);
+      S.renderedKey = null; // animate the new panel in
+      return render();
+    case 'pick-round':
+      S.adminRound = d.round ? Number(d.round) : null;
+      return render();
+    case 'goto-round':
+      S.adminRound = Number(d.round);
+      S.adminTab = 'tables';
+      location.hash = '#/admin';
+      return;
+
+    // Teams
+    case 'team-add': {
+      const res = await api('POST', '/api/teams', {});
+      S.focusAfter = `tn-${res.id}`;
       return;
     }
-    case 'delete-t': {
+    case 'team-del': {
+      const ok = await confirmDialog({ title: `Remove ${teamName(d.id)}?`, body: 'The team and both player names are deleted.', confirmLabel: 'Remove', danger: true });
+      if (ok) await api('DELETE', `/api/teams/${d.id}`);
+      return;
+    }
+    case 'team-move':
+      return api('POST', `/api/teams/${d.id}/move`, { by: Number(d.by) });
+    case 'team-shuffle': {
+      const ok = await confirmDialog({ title: 'Shuffle the teams?', body: 'The order is randomised, which also redraws the groups.', confirmLabel: 'Shuffle' });
+      if (ok) await api('POST', '/api/teams/shuffle');
+      return;
+    }
+
+    // Tournament
+    case 'event-start': {
       const ok = await confirmDialog({
-        title: 'Delete this tournament?',
-        body: 'The bracket, results and player list are gone for good.',
-        confirmLabel: 'Delete',
-        danger: true,
+        title: 'Start the tournament?',
+        body: `${plural(S.state.teams.length, 'team')} are locked into their groups and the schedule is fixed. You can still rename teams and players.`,
+        confirmLabel: 'Start tournament',
       });
       if (!ok) return;
-      await api('DELETE', `/api/tournaments/${d.tid}`);
-      location.hash = '#/admin';
-      return toast('Tournament deleted');
+      await api('POST', '/api/event/start');
+      S.adminTab = 'tables';
+      S.adminRound = null;
+      writeStored('pm_tab', 'tables');
+      return toast('Game on! Round 1 is ready.', 'success');
     }
-    case 'm-pause':
-      await act(r.tid, r.mid, { type: 'pause' });
-      return toast('Match paused — clock stopped, balls kept');
-    case 'm-restart': {
+    case 'event-reset': {
+      const done = e.status === 'done';
       const ok = await confirmDialog({
-        title: 'Restart this match?',
-        body: 'Pocketed balls and groups are cleared and the clock goes back to full time. The match is no longer live until you start it again.',
-        confirmLabel: 'Restart match',
-        danger: true,
+        title: done ? 'Start a new tournament?' : 'Reset the tournament?',
+        body: done ? 'The results go into the hall of fame and the teams stay, ready for another night.' : 'Every result is wiped and you go back to setup. Teams are kept.',
+        confirmLabel: done ? 'New tournament' : 'Wipe results',
+        danger: !done,
       });
       if (!ok) return;
-      await act(r.tid, r.mid, { type: 'restart' });
-      return toast('Match restarted');
+      await api('POST', '/api/event/reset');
+      S.adminTab = 'teams';
+      writeStored('pm_tab', 'teams');
+      return;
     }
-    case 'm-start':
-      return act(r.tid, r.mid, { type: 'start' });
-    case 'm-ball':
-      return act(r.tid, r.mid, { type: 'ball', ball: Number(d.ball) });
-    case 'm-groups':
-      return act(r.tid, r.mid, { type: 'groups', groupA: d.group || null });
-    case 'm-timer':
-      return act(r.tid, r.mid, { type: 'timer', op: d.op, minutes: Number(d.minutes || 0) });
+
+    // Tables
+    case 'round':
+      return api('POST', `/api/rounds/${d.round}/action`, { type: d.type, minutes: 1 });
+    case 'm': {
+      const body = { type: d.type };
+      if (d.type === 'ball') body.ball = Number(d.ball);
+      if (d.type === 'groups') body.groupA = d.group || null;
+      if (d.type === 'add') Object.assign(body, { type: 'timer', op: 'add', minutes: 1 });
+      if (d.type === 'undo') {
+        const ok = await confirmDialog({ title: 'Undo this result?', body: 'The match goes back to live with its balls kept.', confirmLabel: 'Undo result' });
+        if (!ok) return;
+      }
+      const m = findMatch(d.id);
+      const sinkingEight = d.type === 'ball' && body.ball === 8 && !m.potted.includes(8);
+      await act(d.id, body);
+      if (sinkingEight) return eightDown(d.id);
+      return;
+    }
+    case 'm-more':
+      return moreDialog(findMatch(d.id));
     case 'm-winner': {
-      const m = findMatch(r.tid, r.mid);
+      const m = findMatch(d.id);
       const ok = await confirmDialog({
-        title: `${nameOf(m[d.slot])} wins?`,
-        body: 'They advance to the next round. You can undo this until their next match starts.',
+        title: `${teamName(m[d.slot])} wins?`,
+        body: m.stage === 'group' ? 'The result goes into the group standings. You can undo it until the knockout starts.' : 'They go through. You can undo this until their next match starts.',
         confirmLabel: 'Confirm winner',
       });
       if (!ok) return;
-      return act(r.tid, r.mid, { type: 'winner', slot: d.slot, reason: isExpired(m) ? 'timeout' : 'win' });
+      return act(d.id, { type: 'winner', slot: d.slot, reason: isExpired(m) ? 'timeout' : 'win' });
     }
-    case 'm-undo':
-      return act(r.tid, r.mid, { type: 'undo' });
   }
+}
+
+/** The 8 just dropped: usually that decides it, so ask straight away. */
+async function eightDown(mid) {
+  const m = findMatch(mid);
+  if (!m || m.winner) return;
+  const c = await pickTeamDialog(m, {
+    title: `8-ball down on table ${m.table}`,
+    body: 'Legal 8 on a cleared suit wins. An early 8, a scratch on the 8 or a wrong pocket loses. Who takes it?',
+    kind: 'eight',
+    iconName: 'zap',
+    extras: [['undo', `${icon('undo')} Oops, put it back`], ['later', 'Not yet']],
+  });
+  if (c === 'a' || c === 'b') await run(() => act(mid, { type: 'winner', slot: c, reason: isExpired(m) ? 'timeout' : 'win' }));
+  if (c === 'undo') await run(() => act(mid, { type: 'ball', ball: 8 }));
 }
 
 document.addEventListener('submit', (e) => {
   const form = e.target.closest('form[data-form]');
   if (!form) return;
   e.preventDefault();
-  run(() => onForm(form.dataset.form, new FormData(form), form));
+  run(() => onForm(form.dataset.form, new FormData(form)));
 });
 
-/** Sign-in step 1: look the name up, then move to the PIN step (or show why we can't). */
-async function checkName(ctx, name) {
-  const t = ctx ? findT(ctx) : null;
-  try {
-    const res = await api('GET', `/api/players/check?name=${encodeURIComponent(name)}`);
-    if (!res.exists && t && t.status !== 'registration') {
-      S.auth = { ctx, step: 'name', name, error: `There's no player called “${res.name}”, and registration for this tournament is closed.` };
-    } else {
-      S.auth = { ctx, step: 'pin', ...res };
-    }
-  } catch (err) {
-    S.auth = { ctx, step: 'name', name, error: err.message };
-  }
-  render();
-  const next = document.getElementById(S.auth.step === 'pin' ? 'auth-pin' : 'auth-name');
-  (next ?? $app.querySelector('form[data-form="auth-pin"] [type="submit"]'))?.focus();
-}
-
-/** Sign-in step 2: create or sign in — and inside a tournament, join it too. */
-async function submitPin(pin) {
-  const a = S.auth;
-  const t = a.ctx ? findT(a.ctx) : null;
-  let res;
-  try {
-    if (t) res = await api('POST', `/api/tournaments/${t.id}/enter`, { name: a.name, pin });
-    else res = await api('POST', a.exists ? '/api/login' : '/api/register', { name: a.name, pin });
-  } catch (err) {
-    // Someone grabbed the name in the meantime: start over at step 1.
-    S.auth = /taken/i.test(err.message) ? { ctx: a.ctx, step: 'name', name: a.name, error: err.message } : { ...a, error: err.message };
-    render();
-    const pinInput = document.getElementById('auth-pin');
-    if (pinInput) pinInput.value = '';
-    return (pinInput ?? document.getElementById('auth-name'))?.focus();
-  }
-
-  S.auth = { ctx: null, step: 'name' };
-  setSession(res.token, res.me);
-  const name = res.me.player.name;
-  if (t?.status === 'registration') {
-    const msg = {
-      disabled: `Signed in, ${name} — but the admin has disabled you in this tournament.`,
-      verified: `Welcome back, ${name} — you're verified and in.`,
-    }[res.entryStatus];
-    return toast(msg ?? `You're in, ${name}! The admin will verify you shortly.`, msg && res.entryStatus === 'disabled' ? 'error' : 'success');
-  }
-  return toast(a.exists ? `Welcome back, ${name}!` : `Welcome, ${name}!`, 'success');
-}
-
-const resetForm = (name) => $app.querySelector(`form[data-form="${name}"]`)?.reset();
-
-async function onForm(name, data, form) {
-  const r = route();
+async function onForm(name, data) {
   switch (name) {
-    case 'auth-name':
-      return checkName(form.dataset.ctx || null, String(data.get('name') ?? ''));
-    case 'auth-pin':
-      return submitPin(data.get('pin'));
     case 'admin-login': {
       const res = await api('POST', '/api/admin/login', { password: data.get('password') });
       setSession(res.token, res.me);
       return toast('Admin mode on', 'success');
     }
-    case 'create': {
-      const res = await api('POST', '/api/tournaments', {
+    case 'event':
+      await api('PATCH', '/api/event', {
         name: data.get('name'),
-        timerMinutes: data.get('timerMinutes'),
-        liveBalls: data.get('liveBalls') === 'on',
+        clockMinutes: data.get('clockMinutes'),
+        thirdPlace: data.get('thirdPlace') === 'on',
       });
-      resetForm('create');
-      location.hash = `#/t/${res.id}`;
-      return toast('Tournament created — share the link so players can join', 'success');
-    }
-    case 'edit-t':
-      await api('PATCH', `/api/tournaments/${form.dataset.tid}`, {
-        name: data.get('name'),
-        timerMinutes: data.get('timerMinutes'),
-        liveBalls: data.get('liveBalls') === 'on',
-      });
-      return toast('Settings saved', 'success');
-    case 'timer-set':
-      return act(r.tid, r.mid, { type: 'timer', op: 'set', minutes: Number(data.get('minutes')) });
+      return toast('Saved', 'success');
   }
 }
 
+/** Inline edits save when the field loses focus (or on Enter). */
+function saveInline(el) {
+  if (!el.isConnected || el.value === el.defaultValue) return;
+  const { id, index } = el.dataset;
+  const value = el.value.trim();
+  if (!value) {
+    el.value = el.defaultValue;
+    return toast('Names cannot be empty', 'error');
+  }
+  const url = el.dataset.edit === 'team-name' ? `/api/teams/${id}` : `/api/teams/${id}/members/${index}`;
+  el.defaultValue = value; // don't save twice if focus moves around
+  run(() => api('PATCH', url, { name: value }));
+}
+
+document.addEventListener('focusout', (e) => {
+  if (e.target.matches?.('input[data-edit$="-name"]')) saveInline(e.target);
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && e.target.matches?.('input[data-edit$="-name"]')) {
+    e.preventDefault();
+    e.target.blur();
+  }
+  if (e.key === 'Escape' && e.target.matches?.('input[data-edit$="-name"]')) {
+    e.target.value = e.target.defaultValue;
+    e.target.blur();
+  }
+});
+
 document.addEventListener('change', (e) => {
-  if (e.target.dataset.change === 'require-pin') {
-    run(() => api('PATCH', '/api/settings', { requirePin: e.target.checked }));
+  const el = e.target;
+  if (el.dataset.edit === 'member-active') {
+    run(() => api('PATCH', `/api/teams/${el.dataset.id}/members/${el.dataset.index}`, { active: el.checked }));
   }
 });
 
@@ -1370,8 +1445,6 @@ window.addEventListener('hashchange', () => {
   render();
   window.scrollTo(0, 0);
 });
-window.addEventListener('resize', drawConnectors);
-document.fonts?.ready.then(drawConnectors);
 
 /* =====================================================================
    Session & live connection
@@ -1380,15 +1453,15 @@ document.fonts?.ready.then(drawConnectors);
 function setSession(token, me) {
   S.token = token;
   S.me = me;
-  writeToken(token);
-  connect(); // admins get a slightly different feed (always-visible balls)
+  writeStored('pm_token', token);
   render();
 }
 
 function applyState(state) {
+  S.fx = diffState(S.state, state);
   S.state = state;
   S.offset = state.serverTime - Date.now();
-  S.names = new Map(state.players.map((p) => [p.id, p.name]));
+  S.teams = new Map(state.teams.map((t) => [t.id, t]));
   S.online = true;
   render();
 }
@@ -1400,9 +1473,9 @@ function markOffline() {
 
 /** Live updates over SSE; falls back to polling when nothing arrives (some tunnels/proxies block streams). */
 function connect() {
-  if (S.polling) return refresh(true); // the session changed — fetch the right view now
+  if (S.polling) return refresh(true);
   S.events?.close();
-  const es = new EventSource(`/api/events${S.token ? `?token=${encodeURIComponent(S.token)}` : ''}`);
+  const es = new EventSource('/api/events');
   const fallback = setTimeout(startPolling, SSE_TIMEOUT_MS);
   es.addEventListener('state', (e) => {
     clearTimeout(fallback);
@@ -1450,7 +1523,7 @@ async function refresh(force = false) {
     }
     if (!S.me.role) {
       S.token = null;
-      writeToken(null);
+      writeStored('pm_token', null);
     }
   }
   connect();

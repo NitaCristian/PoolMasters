@@ -1,8 +1,10 @@
 # PoolMasters: Spec Sheet
 
-**Version:** 1.0 · **Last updated:** 2026-10-14 · **Status:** v1 implemented
+**Version:** 2.0 · **Last updated:** 2026-10-26 · **Status:** v2 implemented (first pass, open to adjustment)
 
-PoolMasters is a web app for running pool (8-ball) tournaments. One admin creates tournaments and runs the tables. Players join from their phones using a unique name, then follow a live single-elimination bracket. They can watch balls being pocketed and match clocks counting down as it happens.
+PoolMasters runs one pool (8-ball) night at a time. The admin manages everything from one control room: the teams, the tournament and every table. Everyone else opens the site and sees what is happening right now: tables in play, standings, the schedule and the rules. There is no sign-up and no player accounts.
+
+> **What changed from v1:** player sign-up, PINs and verification are gone. Players are no longer individuals who join; the admin creates **teams of two**. The single-elimination bracket is replaced by a fixed **group stage + knockout** format on **4 tables**. The landing page now goes straight to the tournament in play. There are new **Schedule** and **Rules** pages.
 
 ---
 
@@ -10,249 +12,227 @@ PoolMasters is a web app for running pool (8-ball) tournaments. One admin create
 
 | Role | How they get in | What they can do |
 |---|---|---|
-| **Visitor** | Opens the site | View tournaments, brackets, match tables (read-only) |
-| **Player** | Unique name + PIN (4–6 digits) | Everything a visitor can do, plus join and leave tournaments |
-| **Admin** | Admin password (`ADMIN_PASSWORD` env var) | Create, edit and delete tournaments; verify and disable players; draw the bracket; run matches (balls, groups, clock, winner); change sign-in settings |
+| **Viewer** | Opens the site | See everything: live tables, standings, knockout, schedule, rules, stats (read-only) |
+| **Admin** | Admin password (`ADMIN_PASSWORD` env var) | Add, remove and rename teams and players; disable a player; set up, start and reset the tournament; run all tables |
 
-There is exactly **one admin account**. It can be signed in on several devices at once, for example one phone per table.
-
----
-
-## 2. Player identity
-
-- **Unique name.** 2–24 characters: letters, numbers, spaces and `. _ - '`. Uniqueness is case- and whitespace-insensitive, so `Fast Eddie` and `fast  eddie` count as the same name.
-- **PIN.** 4–6 digits, stored as a salted scrypt hash and never sent back to clients.
-- **Brute-force protection.** 5 wrong PINs locks that name for 5 minutes. Admin login uses the same rule, per IP address.
-- **Sessions.** A random bearer token stored in the browser. Sessions expire after 30 days.
-
-### 2.1 Two-step sign-in
-1. **Name.** The player types a name. The server checks whether it is taken (`GET /api/players/check`).
-2. **PIN.**
-   - If the name is **free**, the player chooses a PIN and the player is created.
-   - If the name is **taken**, it shows "Welcome back, *Name*" and asks for that player's PIN.
-   - "Not you? Change name" goes back to step 1.
-
-### 2.2 Where players sign in
-- **On a tournament page (the main way).** While registration is open, a "Join this tournament" panel holds the two-step flow. Finishing it signs the player in, or creates them, **and joins that tournament** in one step (`POST /api/tournaments/:id/enter`).
-- **Once a tournament is in progress.** The panel lets only **existing** players sign in. New names are refused because registration is closed.
-- **On the home page.** If any tournament is open for registration, the home page lists those tournaments with **Join** buttons instead of a form. The plain sign-in/sign-up form appears only when **no tournament is open**.
-- **"Require a PIN" toggle (admin setting, on by default).** This is still an open product question (see §11).
-  - **On:** a PIN is required to register and to sign in.
-  - **Off:** players register and sign in with only their name. This is faster, but anyone can sign in as anyone.
-  - A player who registered while PINs were off and signs in after PINs are turned on sets their PIN at that sign-in.
+There is one admin password. It can be signed in on several devices at once, for example one phone per table.
 
 ---
 
-## 3. Tournament lifecycle
+## 2. Teams
 
+- A team always has **exactly two players**.
+- **Add team** creates "Team N" with "Player 1" and "Player 2". The admin renames them inline: click a name, type, and press Enter (or click away) to save. Esc cancels.
+- Any player can be **disabled** (switch next to their name) and enabled again. A disabled player is struck through in the admin list and hidden from public pages. The team keeps playing with the other player. If both are disabled, public pages show "No active players".
+- Names are 1–24 characters. Team and player names can be edited **at any time**, including during play.
+- **Order = seed.** The first half of the list is Group 1 and the rest is Group 2. The admin can move teams up and down or **Shuffle** the order at random.
+- Adding, removing, reordering and shuffling are only possible **during setup**. Once the tournament starts, the team list is locked (renaming and disabling still work).
+- Limits: at least 4 teams to start, at most 32.
+
+---
+
+## 3. Tournament format
+
+Designed for **10 teams on 4 tables in 8 rounds of 15 minutes** (about two hours). Other team counts also work, see §3.4.
+
+### 3.1 Group stage (rounds 1–5)
+- Two groups of five: Group 1 = teams 1–5, Group 2 = teams 6–10.
+- Single round robin: each team plays 4 matches and rests (bye) in 1 round.
+- **Tables 1 and 2 = Group 1. Tables 3 and 4 = Group 2.**
+- Rotation: in round *r* the resting team is the (6 − *r*)th of its group, so Team 5 and Team 10 rest in round 1, Team 4 and Team 9 in round 2, and so on.
+
+| Round | Table 1 | Table 2 | Table 3 | Table 4 | Resting |
+|---|---|---|---|---|---|
+| 1 | T1 v T4 | T2 v T3 | T6 v T9 | T7 v T8 | T5, T10 |
+| 2 | T1 v T2 | T3 v T5 | T6 v T7 | T8 v T10 | T4, T9 |
+| 3 | T1 v T5 | T2 v T4 | T6 v T10 | T7 v T9 | T3, T8 |
+| 4 | T1 v T3 | T4 v T5 | T6 v T8 | T9 v T10 | T2, T7 |
+| 5 | T2 v T5 | T3 v T4 | T7 v T10 | T8 v T9 | T1, T6 |
+
+### 3.2 Knockout (rounds 6–8)
+| Round | Table 1 | Table 2 | Table 3 | Table 4 |
+|---|---|---|---|---|
+| 6 · Quarterfinals | 1st G1 v 4th G2 | 2nd G2 v 3rd G1 | 1st G2 v 4th G1 | 2nd G1 v 3rd G2 |
+| 7 · Semifinals | W QF1 v W QF2 | W QF3 v W QF4 | *open play* | *open play* |
+| 8 · Finals | **Championship**: W SF1 v W SF2 | 3rd place: L SF1 v L SF2 (optional) | *open play* | *open play* |
+
+Group winners can only meet in the final. Quarterfinal slots fill in automatically when the **last group match** is decided. Later slots fill in as results arrive.
+
+### 3.3 Standings and tiebreaks
+- A win = **1 point**.
+- **Two-way tie:** head-to-head result (marked **H2H** in the table).
+- **Three or more tied:** ball differential across all group matches (marked **±**), then balls cleared, then seed.
+- **Ball differential**, per match: balls of your own suit pocketed, plus 1 for the 8 if you won with it down, minus the same for your opponent. A match with an open table (no suits set) counts 0–0.
+- The cut line under 4th place is drawn as a dashed gold line.
+
+### 3.4 Other team counts
+The same rules are applied generically: groups are ⌈n/2⌉ and ⌊n/2⌋, round robin by the circle method (odd groups have one bye per round). If both groups have ≥ 4 teams, the top 4 go to quarterfinals. Otherwise the top 2 go straight to semifinals (1st G1 v 2nd G2, 1st G2 v 2nd G1). The number of tables is whatever the busiest round needs.
+
+### 3.5 Lifecycle
 ```
-registration ──(admin: Draw bracket)──▶ in_progress ──(final decided)──▶ completed
-      ▲                                      │
-      └──────────(admin: Redraw)─────────────┘   (wipes all results)
+setup ──(Start tournament)──▶ live ──(last match decided)──▶ done
+  ▲                             │                              │
+  └──────(Reset: wipe results)──┘     (New tournament: archive)┘
 ```
-
-### 3.1 Registration
-- The admin creates a tournament with a **name**, a **default match clock** (0–180 min, 0 = no clock) and a **"live balls" visibility** toggle.
-- A player taps **Join** and gets an entry with status **`pending`** (unverified).
-- The admin **verifies** each player (`pending → verified`) or **disables** them.
-- A player can **leave**. They can rejoin while registration is still open, and come back as `pending`.
-
-### 3.2 Entry statuses and the player board
-
-| Status | Meaning | How it is shown | Board order |
-|---|---|---|---|
-| `verified` | Approved by the admin, will be in the bracket | Normal card, green dot | 1st (by join time) |
-| `pending` | Joined, not yet approved | Greyed out, dashed border, "Awaiting verification" | 2nd (by join time) |
-| `disabled` | Removed by the admin | Faded, name struck through, red dot | Last (by time of change) |
-| `left` | The player withdrew | Faded, name struck through, grey dot | Last (by time of change) |
-
-Once the bracket is drawn, verified players also show their **fate**: *Still in*, *Eliminated* or *Champion* (with a crown).
-
-### 3.3 Drawing the bracket
-- Needs **at least 2 verified players**. Pending players are left out.
-- Format: **single elimination**. The bracket size is the next power of two.
-- Seeding is **random** (crypto-random shuffle), placed with standard seed order (1v8, 4v5, 2v7, 3v6…). Because of this, **byes are spread evenly** and a bye never meets another bye.
-- Byes are resolved automatically: the player advances.
-
-### 3.4 Withdrawals during play
-If a player is **disabled** or **leaves** while the tournament is in progress:
-- Their current match (opponent known) is a **forfeit**, and the opponent advances.
-- If their next opponent isn't known yet, the forfeit applies as soon as the opponent arrives.
-- Results cascade automatically through later rounds.
-- Players who were pending when the bracket was drawn cannot be added later. To add them, redraw the bracket.
+- **Setup:** teams are editable. Everyone can already see a **preview** of the schedule built from the current team list.
+- **Start** locks the teams and fixes the schedule.
+- **Reset** (while live) wipes every result and goes back to setup. Teams are kept.
+- **New tournament** (when done) saves the night to the **Hall of fame** (name, date, podium, totals) and goes back to setup with the same teams.
+- Settings: tournament name, match clock (default **15 min**, 0 = none), 3rd-place match on/off (can only be changed during setup).
 
 ---
 
 ## 4. Matches
 
-### 4.1 Match states
+### 4.1 States
 | State | Meaning |
 |---|---|
-| `waiting` | One or both slots are still TBD |
-| `ready` | Both players known, not started ("Up next") |
-| `live` | Started by the admin (or any ball, group or clock-start action) |
-| `done` | Has a winner |
+| `waiting` | Knockout slot not known yet (shows "1st G1", "Winner QF2", …) |
+| `ready` | Both teams known, not started ("Up next"), or **paused** (started before) |
+| `live` | Running |
+| `done` | Has a winner. Result `win` or `timeout` |
 
-**Result types:** `win` (normal), `timeout` (decided when the clock ran out), `forfeit`, `bye`.
+### 4.2 Ball tracking
+- Balls 1–7 are Solids, 9–15 are Stripes, 8 is the 8-ball. All balls are drawn as real balls.
+- Suits: the admin sets "Team A: Solids", "Team A: Stripes" or **Open**. Team B automatically gets the other suit.
+- Tap a ball to mark it pocketed, and tap again to undo. Each team shows **balls left** of its suit.
+- **Sinking the 8** opens a prompt straight away: *who takes it?* (Team A / Team B / "Oops, put it back" / "Not yet").
+- The app never decides a winner by itself. The admin always confirms.
 
-### 4.2 Ball tracking (8-ball)
-- Balls 1–7 are **Solids**, 9–15 are **Stripes**, and 8 is the 8-ball. Every ball is drawn as a real ball: colour, number disc, white bands for stripes, gloss.
-- **Groups:** the admin sets player A to Solids or Stripes. Player B automatically gets the other group. The table can also be left **open**.
-- **Pocketing:** the admin taps a ball in a triangle rack to mark it pocketed, and taps again to undo. The order balls were pocketed is kept and shown in a "Pocketed" tray.
-- Under each player: a group chip (with a ball icon), their 7 balls with pocketed ones dimmed, and an "x / 7 pocketed" count.
-- The app does **not** decide winners from balls (fouls, early 8, etc.). The admin always declares the winner.
+### 4.3 Clock
+- Every match starts with the tournament clock (default 15 min). The admin can **set** a different time per match, **+1 min**, **reset** it, or pause it.
+- The clock is server-authoritative (`endsAt`), so every device shows the same countdown. It turns amber in the last minute and blinks red at 00:00.
+- **Time's up:** every admin device beeps and shows a popup that says who is ahead on balls ("Team X has fewer balls left (2 vs 5)") or, when level, reminds them of the **sudden-death 8-ball shot**. The popup offers: pick the winner (recorded as *on time*), **+2 more minutes**, or **Decide later**. It closes on all devices once the match is decided anywhere.
 
-### 4.3 Live-ball visibility
-Each tournament has a **"Show pocketed balls to players live"** toggle (default on).
-- **On:** everyone sees pocketed balls in real time.
-- **Off:** non-admins still see groups, but the server removes ball data from their feed. Admins always see everything.
-
-### 4.4 Match clock
-- Every match starts with the tournament's default duration. The admin can adjust it per match.
-- Controls: **Set** (minutes), **Start / Pause / Resume**, **+1 min**, **Reset**.
-- **Start match** also starts the clock, if one is set.
-- The clock is server-authoritative (`endsAt` timestamp). Each device corrects for clock skew using the server time sent with every update, so all phones show the same countdown.
-- The clock turns amber in the last minute and blinks red at 00:00.
-- **Time's up:** when a running clock hits zero, every admin device shows a popup on whatever page it is on, with a short beep. The popup offers: **pick the winner** (recorded as `timeout`), **+2 more minutes**, or **Decide later**. The popup closes itself on all devices once the match is resolved anywhere.
-
-### 4.5 Declaring a winner and undo
-- The admin taps the winner (with a confirmation step). The winner advances to the next match. If it was the final, the tournament becomes `completed` and that player is the **champion**.
-- **Undo result** is allowed until the next match has started or finished. Byes and forfeits cannot be undone.
+### 4.4 Undo
+- **Undo** puts a decided match back to live, with balls kept.
+- A group match can be undone until the knockout has started. A knockout match can be undone until the match it feeds has started.
 
 ---
 
 ## 5. Screens
 
-| Route | Screen | Highlights |
+| Route | Screen | What's on it |
 |---|---|---|
-| `#/` | Home | Hero; "Join a tournament" list when any tournament is open, otherwise the two-step sign-in card (signed-in players see a welcome card listing their entries); tournament cards with status, player count, clock, live tables, progress bar, champion |
-| `#/t/:id` | Tournament | Header with status and actions (Join/Leave, or for the admin: Draw bracket / Redraw / Delete / Settings); **join panel** with the two-step sign-in for signed-out visitors; champion banner; **Now playing** tiles; **Bracket**; **Player board** |
-| `#/t/:id/m/:matchId` | Table view | Pool-table scoreboard (wood rail, 6 pockets, felt): avatars, groups, ball rows, big clock, 8-ball; pocketed tray. Admins also get **Table control**: triangle rack, groups, clock controls, winner buttons, undo |
-| `#/admin` | Control room | Admin login, or: create tournament, verification queue across all tournaments, "Require a PIN" switch, list of all tournaments |
+| `#/` | **Live** (landing) | *Setup:* "Racking up soon" hero with an animated rack, team cards with group badges, Hall of fame. *Live / done:* champion banner (when done), tournament name, **round track** (8 segments filling as matches finish, knockout in gold), **stat tiles** (matches played, balls pocketed, 8-balls sunk, average match time), **On the tables** (one mini pool table per table for the current round: teams, live clock, balls left, suit balls, resting teams), **Group standings**, **Road to the final** (QF → SF → Final + 3rd place), **Leaders** (most wins, balls cleared, fastest win, biggest margin), **Hall of fame** |
+| `#/schedule` | **Schedule grid** | 8 rows (rounds) × 4 columns (tables) + a **Resting** column. Row labels show the stage and the planned start time (start + (r−1) × clock). Group 1 cells are green, Group 2 blue, knockout gold. Unused tables in rounds 7–8 are hatched **Open play**. The current round is highlighted with a "Now" tag, live cells glow with a running clock, winners get a check and losers are struck through. During setup it is a labelled preview. Admins can click a cell to jump to that round in the control room. |
+| `#/rules` | **Rules** | On-the-table rules (open table, calling shots, legal shot, fouls/ball-in-hand, losing on the 8). The format as a 4-step flow (group stage → QF → SF → Final). Clock, standings, ball differential and schedule rules. |
+| `#/admin` | **Control room** | Sign-in, then three tabs: **Tables**, **Teams**, **Tournament** (the last tab is remembered per device) |
 
-### 5.1 Bracket visuals
-- One column per round (Round of N → Quarterfinals → Semifinals → Final), with elbow connector lines that turn green once a match is decided.
-- Match card rows: **green = won**, **red = lost**, with a W/L badge. The **final winner gets a gold crown**, and the final card gets a gold glow.
-- Live matches get a glowing green border and show a running clock, group chips and mini ball rows.
-- Status tags on cards: *Up next*, *Live mm:ss*, *Bye*, *Forfeit*, *On time*.
-- Disabled players or players who left are tagged on their bracket card.
+### 5.1 Control room: Tables tab
+- **Round bar** (sticky): round chips 1–8 (green = done, gold = knockout done, pulsing = live), the selected round's name, its longest-running clock and "x of y tables live". It follows the current round automatically. Picking another round sticks until "Back to round N".
+- **Start all tables** starts every playable table in the round with **one shared start time**, so all clocks run in sync. The same button resumes paused tables. Also **Pause all** and **+1 min all**.
+- **One card per table** (2 × 2 on desktop, stacked on phones). Each card shows the teams with avatars, active players, suit chip and a big **balls-left** number; suit buttons; a felt **rack** with solids, the 8 and stripes, each set labelled with its owner; Start/Pause/Resume, +1, a settings menu (set clock, reset clock, restart match); and two **winner** buttons. Decided cards show the winner and **Undo**. Unresolved knockout cards show their sources.
+- Resting teams for the round are listed under the cards.
 
-### 5.2 Visual theme
-- Dark "pool hall" palette: near-black background with emerald (felt) and gold (trophy) accents. Glassy cards. A pool-table scoreboard with a wood rail.
-- Typography: **Space Grotesk** for headings, **Inter** for body text.
-- Responsive down to 360 px wide. On phones the scoreboard stacks vertically and the bracket scrolls sideways inside its own container.
-- Honours `prefers-reduced-motion`.
+### 5.2 Control room: Teams tab
+Teams listed under Group 1 / Group 2 headings (by position), each row: seed, avatar, team name (inline edit), two players (inline edit + on/off switch), move up/down, remove. **Add team**, **Shuffle**, and an "Add another team" row at the bottom.
+
+### 5.3 Control room: Tournament tab
+Name, match clock and 3rd-place settings; a plain-language format summary for the current team count; **Start tournament** / **Reset tournament** / **New tournament**.
+
+### 5.4 Animations
+- Page sections rise in with a stagger when you open a page (not on live updates).
+- A pocketed ball spins and shrinks into the pocket, and an un-pocketed ball pops back.
+- Standings rows **slide** to their new position when the order changes (FLIP).
+- Stat counters roll up to their new values.
+- When a match is decided, its card flashes gold and bursts **confetti**. The champion gets a multi-burst celebration, a rotating glow and a bobbing crown.
+- The live round segment shimmers, live tables glow, live badges pulse, and the clock pulses in the last minute.
+- All motion is off under `prefers-reduced-motion`.
+
+### 5.5 Visual theme
+Dark pool-hall palette (near-black, emerald felt, gold trophy accents), wood-rimmed felt tables, Space Grotesk headings and Inter body text. Responsive down to 360 px: the schedule grid and knockout scroll sideways inside their own containers, with the round labels sticky.
 
 ---
 
 ## 6. Real-time model
 
-- **Transport:** Server-Sent Events (`GET /api/events`). After any change, the server pushes the complete public state to every connected client.
-- Clients re-render from that state. Typed input, focus, open panels and bracket scroll position are kept across re-renders.
-- Changes are made with ordinary REST calls. Every successful change saves the data and broadcasts it.
-- A connection dot in the top bar shows live (green) or reconnecting (red). Clients reconnect automatically.
-- **Polling fallback.** Some proxies block SSE, for example Cloudflare Quick Tunnels. If no update arrives within 5 s, the client switches to `GET /api/state`:
-  - It refreshes every **10 s**.
-  - It also refreshes immediately after the user's own actions and when the tab regains focus.
-  - Match clocks still tick smoothly, because they count down on each device.
-  - The connection dot turns amber ("Updating every 10 s").
+- **Server-Sent Events** (`GET /api/events`) push the full state to every client after each change. Everyone gets the same state.
+- Clients re-render from state and keep focus, typed text, scroll and open panels. Only the parts that changed animate.
+- **Polling fallback** when SSE is blocked (e.g. Cloudflare Quick Tunnels): `GET /api/state?v=` every 2 s while visible, and immediately after your own actions. The connection dot shows green (live), amber (polling) or red (reconnecting).
 
 ---
 
-## 7. Data model (persisted to `data/db.json`)
+## 7. Data model (`data/db.json`, version 2)
 
 ```js
-settings:    { requirePin: boolean }
-players:     { [id]: { id, name, nameKey, pinSalt?, pinHash?, createdAt } }
-sessions:    { [token]: { role: 'admin' | 'player', playerId, createdAt } }
-tournaments: { [id]: {
-  id, name, status: 'registration' | 'in_progress' | 'completed',
-  timerMinutes, liveBalls, rounds, championId, createdAt, startedAt, completedAt,
-  entries: [{ playerId, status: 'pending' | 'verified' | 'disabled' | 'left', joinedAt, updatedAt }],
+version: 2
+sessions: { [token]: { createdAt } }                      // admin sessions only
+teams:    [{ id, name, members: [{ name, active }, { name, active }], createdAt }]   // order = seed
+event: {
+  name, status: 'setup' | 'live' | 'done',
+  clockMinutes, thirdPlace,
+  groups: [[teamId…], [teamId…]], groupRounds, rounds, tables, advance,
   matches: [{
-    id: 'r{round}m{index}', round, index,
-    a, b,                       // player ids (null = TBD)
-    bye: 'a' | 'b' | null,
-    winner: 'a' | 'b' | null,
-    result: 'win' | 'timeout' | 'forfeit' | 'bye' | null,
-    groupA: 'solids' | 'stripes' | null,
-    potted: number[],           // in pocketing order
+    id: 'r{round}t{table}', round, table,
+    stage: 'group' | 'qf' | 'sf' | 'final' | 'third', group: 0 | 1 | null,
+    a, b,                                   // team ids (null until known)
+    srcA, srcB,                             // {rank:{group,place}} | {winner:id} | {loser:id}
+    winner: 'a' | 'b' | null, result: 'win' | 'timeout' | null,
+    groupA: 'solids' | 'stripes' | null,    // team B gets the other suit
+    potted: number[],                       // in pocketing order
     timer: { durationMs, remainingMs, endsAt, running },
     live, startedAt, finishedAt
-  }]
-}}
+  }],
+  championId, startedAt, completedAt
+}
+history: [{ name, startedAt, completedAt, teams, matches, balls, podium: [{ name, members }|null ×3] }]
 ```
 
-The winner of match `r{R}m{i}` feeds slot `a` (if `i` is even) or `b` (if `i` is odd) of match `r{R+1}m{⌊i/2⌋}`.
+Standings are computed, not stored. During setup the public state carries a **preview** schedule (`event.preview: true`) built from the current teams.
 
-Writes are debounced (150 ms) and atomic (write to a temp file, then rename). If `db.json` cannot be read, it is moved aside to `db.corrupt-<ts>.json` and never overwritten.
+Writes are debounced (150 ms) and atomic. An unreadable file is moved to `db.corrupt-<ts>.json`. A **v1 file** (players/brackets) is moved to `db.v1-<ts>.json` and the app starts fresh.
 
 ---
 
 ## 8. API
 
-All bodies are JSON. Authentication uses `Authorization: Bearer <token>`.
+JSON bodies. Admin calls need `Authorization: Bearer <token>`.
 
-| Method | Path | Who | Purpose |
-|---|---|---|---|
-| GET | `/api/events?token=` | anyone | SSE stream of state |
-| GET | `/api/me` | anyone | Current role and player |
-| GET | `/api/players/check?name=` | anyone | Sign-in step 1 → `{name, exists, hasPin, requirePin}` |
-| POST | `/api/tournaments/:id/enter` | anyone | Sign-in step 2 inside a tournament: `{name, pin}` → sign in or create, join if registration is open → `{token, me, created, entryStatus}` |
-| POST | `/api/register` | anyone | `{name, pin}` → `{token, me}` |
-| POST | `/api/login` | anyone | `{name, pin}` → `{token, me}` |
-| POST | `/api/admin/login` | anyone | `{password}` → `{token, me}` |
-| POST | `/api/logout` | any session | End the session |
-| PATCH | `/api/settings` | admin | `{requirePin}` |
-| POST | `/api/tournaments` | admin | `{name, timerMinutes, liveBalls}` → `{id}` |
-| PATCH | `/api/tournaments/:id` | admin | Same fields as create (partial) |
-| DELETE | `/api/tournaments/:id` | admin | Delete |
-| POST | `/api/tournaments/:id/join` | player | Join (→ `pending`) |
-| POST | `/api/tournaments/:id/leave` | player | Leave (→ `left`, forfeits if in play) |
-| POST | `/api/tournaments/:id/entries/:playerId` | admin | `{status: 'verified' \| 'disabled'}` |
-| POST | `/api/tournaments/:id/start` | admin | Draw the bracket |
-| POST | `/api/tournaments/:id/reset` | admin | Wipe the bracket, reopen registration |
-| POST | `/api/tournaments/:id/matches/:mid/action` | admin | See below |
-
-**Match actions** (`type`):
-- `start`
-- `ball` with `{ball: 1–15}` (toggles the ball)
-- `groups` with `{groupA: 'solids' | 'stripes' | null}`
-- `timer` with `{op: 'set' | 'start' | 'pause' | 'add' | 'reset', minutes?}`
-- `winner` with `{slot: 'a' | 'b', reason?: 'timeout'}`
-- `undo`
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/events` | SSE state stream |
+| GET | `/api/state?v=` | State (or `{unchanged:true}`) |
+| GET | `/api/me` | `{role: 'admin' \| null}` |
+| POST | `/api/admin/login` | `{password}` → `{token, me}` (5 wrong tries per IP → 5 min lock) |
+| POST | `/api/logout` | End session |
+| POST | `/api/teams` | Add team `{name?, members?: [a, b]}` (setup only) |
+| PATCH | `/api/teams/:id` | `{name}` |
+| PATCH | `/api/teams/:id/members/:index` | `{name?, active?}` |
+| DELETE | `/api/teams/:id` | Remove (setup only) |
+| POST | `/api/teams/:id/move` | `{by: -1 \| 1}` (setup only) |
+| POST | `/api/teams/shuffle` | Random order (setup only) |
+| PATCH | `/api/event` | `{name?, clockMinutes?, thirdPlace?}` |
+| POST | `/api/event/start` | Build the schedule and go live |
+| POST | `/api/event/reset` | Back to setup (archives a finished night) |
+| POST | `/api/matches/:id/action` | `start`, `pause`, `restart`, `ball {ball}`, `groups {groupA}`, `timer {op: set\|add\|reset, minutes}`, `winner {slot, reason?}`, `undo` |
+| POST | `/api/rounds/:round/action` | `start` (shared start time), `pause`, `add {minutes}` for every playable table in the round |
 
 ---
 
 ## 9. Security notes
 
-- PINs: scrypt with a per-player salt, compared in constant time.
-- Admin password: compared in constant time. The default is `poolmasters`, and the server prints a warning until `ADMIN_PASSWORD` is set.
-- All user text is HTML-escaped before rendering.
-- Request bodies are capped at 16 KB. Static file serving is protected against path traversal.
-- **Known trade-offs:**
-  - A 4-digit PIN is "somewhat secure", not strong.
-  - Locking by name means someone can deliberately lock another player out for 5 minutes.
-  - The SSE token is sent in the query string.
-  - There is no HTTPS by itself. Put the app behind a TLS proxy if it is exposed beyond the local network.
+- Only the admin can change anything. Everything is publicly readable.
+- Admin password compared in constant time. The default is `poolmasters`, and the server warns until `ADMIN_PASSWORD` is set.
+- All user text is HTML-escaped. Bodies capped at 16 KB. Static serving is protected against path traversal.
+- There is no HTTPS by itself. Put the app behind a TLS proxy (or the Cloudflare tunnel) when it is exposed beyond the local network.
 
 ---
 
-## 10. Non-goals for v1
+## 10. Non-goals (for now)
 
-- Double elimination, round robin, race-to-N frames, or 9-ball rules
-- Automatic rule enforcement (fouls, early 8-ball losses)
-- Multiple admins with separate accounts, or per-table referees
-- Player self-service (renaming, PIN reset). For now the admin edits `data/db.json`.
-- Multi-instance deployment (state is held in one process)
+- Automatic rule enforcement (fouls, early 8)
+- Several tournaments at once, or several admin accounts
+- Race-to-N frames per match
+- Teams of other sizes than two
 
 ---
 
 ## 11. Open questions
 
-1. **Is the PIN necessary?** The toggle exists so you can try both at a real event. Possible middle ground: no PIN, but sessions stay signed in on the device and the admin's verification step does the gatekeeping.
-2. **Show balls live to players?** Implemented per tournament (default on). Decide whether the default should be off.
-3. **"Nakeds" vs "Stripes".** The UI says *Stripes*. If your group calls them something else, it is a one-word change in `GROUPS` in `public/app.js`.
-4. **Seeding.** Currently random. Should the admin be able to seed manually or by ranking?
-5. **Race to N.** Should one bracket match be best-of-3 or best-of-5 frames, with a frame score?
-6. **Player PIN reset.** Should there be an admin button for it?
+1. **Disabled players.** A disabled player is only a label for now: the team still plays. Should a team with both players disabled forfeit its matches automatically?
+2. **Withdrawing a team mid-tournament.** Not supported: teams are locked once started. Should there be a "withdraw" that forfeits its remaining matches?
+3. **Seeding into groups.** Currently by list order (with Shuffle). Is manual drag-and-drop between groups wanted?
+4. **3rd-place match.** It is on by default and must be decided before the start. Should it be possible to skip it on the night?
+5. **Open-table ball differential.** A match finished with an open table counts 0–0. OK, or should the admin always set suits?
+6. **"Stripes" wording.** If your group says something else, change `GROUPS` in `public/app.js`.
