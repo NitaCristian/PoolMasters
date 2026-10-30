@@ -29,6 +29,8 @@ const empty = () => ({
   teams: [], // [{ id, name, members: [{ name, active }], createdAt }] — order = seed
   event: newEvent(),
   history: [], // finished nights: { name, completedAt, podium: [{ name, members }], ... }
+  ai: { model: null }, // Gemini settings; the API key is NOT here (see src/ai.js)
+  chats: [], // admin only, never in the public state: { id, title, lang, createdAt, updatedAt, messages: [{ role, text, at }] }
 });
 
 /** Moves a file we will not use out of the way, so it is never overwritten. */
@@ -80,4 +82,4 @@ function flush(db) {
   write(db);
 }
 
-module.exports = { load, save, flush, newEvent, DB_FILE };
+module.exports = { load, save, flush, newEvent, DB_FILE, DATA_DIR };

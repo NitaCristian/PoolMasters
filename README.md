@@ -18,7 +18,7 @@ Open http://localhost:3000. Other phones on the same Wi-Fi can use `http://<this
 |---|---|---|
 | `PORT` | `3000` | HTTP port |
 | `ADMIN_PASSWORD` | `poolmasters` | Admin sign-in |
-| `DATA_DIR` | `./data` | Where `db.json` is stored |
+| `DATA_DIR` | `./data` | Where `db.json` and `secrets.json` are stored |
 
 `npm run dev` restarts the server automatically whenever you change a file.
 
@@ -37,6 +37,15 @@ Options:
 
 The `--` after `live` is required, so the options reach the app instead of npm. You need cloudflared installed: `winget install --id Cloudflare.cloudflared`.
 
+## Ask Gemini about the rules
+
+1. Start the server with your own `ADMIN_PASSWORD`. A key can't be saved with the default password.
+2. Create a key at [Google AI Studio](https://aistudio.google.com/apikey).
+3. **Admin** → **Tournament** tab → **Gemini** card → paste the key → **Save**.
+4. Ask away in the **Ask Gemini** tab. Your rules are sent along automatically.
+
+The key is stored encrypted with the admin password, so if you change that password, paste the key again. Back up `data/` carefully and never commit it.
+
 ## Typical night
 
 1. **Admin** → `#/admin` → sign in → **Teams** tab → **Add team** for each pair and type the names. (Order decides the groups; use **Shuffle** for a random draw.)
@@ -52,5 +61,6 @@ server.js          HTTP server, REST routes, SSE live updates, static files
 src/tournament.js  schedule (round robin + knockout), standings, match and round actions, clock
 src/auth.js        admin password check, tokens, lockouts
 src/store.js       JSON persistence
+src/ai.js          Gemini: encrypted API key, rules prompt, API calls
 public/            single-page app (index.html, app.js, i18n.js with English + Dutch text, styles.css)
 ```

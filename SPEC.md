@@ -1,6 +1,6 @@
 # PoolMasters: Spec Sheet
 
-**Version:** 2.0 · **Last updated:** 2026-10-26 · **Status:** v2 implemented (first pass, open to adjustment)
+**Version:** 2.1 · **Last updated:** 2026-10-30 · **Status:** v2 implemented (first pass, open to adjustment)
 
 PoolMasters runs one pool (8-ball) night at a time. The admin manages everything from one control room: the teams, the tournament and every table. Everyone else opens the site and sees what is happening right now: tables in play, standings, the schedule and the rules. There is no sign-up and no player accounts.
 
@@ -13,7 +13,7 @@ PoolMasters runs one pool (8-ball) night at a time. The admin manages everything
 | Role | How they get in | What they can do |
 |---|---|---|
 | **Viewer** | Opens the site | See everything: live tables, standings, knockout, schedule, rules, stats (read-only) |
-| **Admin** | Admin password (`ADMIN_PASSWORD` env var) | Add, remove and rename teams and players; disable a player; set up, start and reset the tournament; run all tables |
+| **Admin** | Admin password (`ADMIN_PASSWORD` env var) | Add, remove and rename teams and players; disable a player; set up, start and reset the tournament; run all tables; ask Gemini about the rules and manage its API key |
 
 There is one admin password. It can be signed in on several devices at once, for example one phone per table.
 
@@ -118,7 +118,7 @@ setup ──(Start tournament)──▶ live ──(last match decided)──▶
 | `#/schedule` | **Schedule grid** | 8 rows (rounds) × 4 columns (tables) + a **Resting** column. Row labels show the stage and the planned start time (start + (r−1) × clock). Group 1 cells are green, Group 2 blue, knockout gold. Unused tables in rounds 7–8 are hatched **Open play**. The current round is highlighted with a "Now" tag, live cells glow with a running clock, winners get a check and losers are struck through. During setup it is a labelled preview. Admins can click a cell to jump to that round in the control room. |
 | `#/rules` | **Rules: Basics** | On-the-table rules (open table, only the 8 is called, legal shot, fouls/ball-in-hand, losing on the 8). The format as a 4-step flow (group stage → QF → SF → Final). Clock, standings, ball differential and schedule rules. |
 | `#/rules/full` | **Rules: Full rules & glossary** | The complete rulebook in 13 numbered sections (table & equipment, racking, the break, open table, turns, legal shot, fouls, ball in hand, shooting the 8, time limit, team play, conduct & disputes, tournament format), with a sticky table of contents. Points that are choices for this tournament carry a gold **House rule** tag. A searchable A–Z **glossary** of 53 terms shows each term with its translation in the other language. The last rules tab you opened is remembered. |
-| `#/admin` | **Control room** | Sign-in, then three tabs: **Tables**, **Teams**, **Tournament** (the last tab is remembered per device) |
+| `#/admin` | **Control room** | Sign-in, then four tabs: **Tables**, **Teams**, **Tournament**, **Ask Gemini** (the last tab is remembered per device) |
 
 ### 5.1 Control room: Tables tab
 - **Round bar** (sticky): round chips 1–8 (green = done, gold = knockout done, pulsing = live), the selected round's name, its longest-running clock and "x of y tables live". It follows the current round automatically. Picking another round sticks until "Back to round N".
@@ -130,7 +130,7 @@ setup ──(Start tournament)──▶ live ──(last match decided)──▶
 Teams listed under Group 1 / Group 2 headings (by position), each row: seed, avatar, team name (inline edit), two players (inline edit + on/off switch), move up/down, remove. **Add team**, **Shuffle**, and an "Add another team" row at the bottom.
 
 ### 5.3 Control room: Tournament tab
-Name, match clock and 3rd-place settings; a plain-language format summary for the current team count; **Start tournament** / **Reset tournament** / **New tournament**.
+Name, match clock and 3rd-place settings; a plain-language format summary for the current team count; **Start tournament** / **Reset tournament** / **New tournament**. A **Gemini** card holds the API key and model (see 5.7).
 
 ### 5.4 Animations
 - Page sections rise in with a stagger when you open a page (not on live updates).
@@ -151,6 +151,13 @@ Dark pool-hall palette (near-black, emerald felt, gold trophy accents), wood-rim
 - A switch with flags (🇬🇧 EN / 🇳🇱 NL) sits in the top bar on every page. The choice is saved in the browser (`pm_lang`) and kept on later visits. The first visit follows the browser language (Dutch browsers start in Dutch).
 - Dutch uses the usual pool terms: **helen / halven** for solids / stripes, **kwartfinale (KF) / halve finale (HF)**, **troostfinale** for the 3rd-place match.
 - All text lives in `public/i18n.js` (`STRINGS`, `RULEBOOK`, `GLOSSARY`). Add a key to both languages when adding text.
+
+### 5.7 Control room: Ask Gemini tab
+- Admin only. The admin chats with Google Gemini about the rules. Setup: paste a key in **Tournament → Gemini**. It is checked with Google before it is saved. The model is editable and defaults to `gemini-3.8-flash`.
+- **Rules as context:** every request carries the Basics, the full rulebook (house rules marked) and the glossary as a system instruction, in the chat's language, because the Gemini API has no memory between calls. Rule edits therefore reach existing chats. Gemini is told to answer from these rules first, name the section, and say so when they don't cover something. The last 41 messages of the chat are sent with it.
+- **Several chats:** a sidebar lists them, newest activity first; each can be reopened or deleted. The title is the start of the first question.
+- **No empty chats:** **New chat** only opens a blank page. The chat is created on the server when the first question has been answered. If Gemini fails, nothing is saved and the question goes back in the box.
+- Limits: 4000 characters per message, 400 messages per chat, 200 chats, 20 questions per minute.
 
 ## 6. Real-time model
 
@@ -184,7 +191,11 @@ event: {
   championId, startedAt, completedAt
 }
 history: [{ name, startedAt, completedAt, teams, matches, balls, podium: [{ name, members }|null ×3] }]
+ai:       { model }                                       // null = default model
+chats:    [{ id, title, lang, createdAt, updatedAt, messages: [{ role: 'user' | 'model', text, at }] }]
 ```
+
+The Gemini API key is not in `db.json`. It is in `data/secrets.json`, encrypted (see 9).
 
 Standings are computed, not stored. During setup the public state carries a **preview** schedule (`event.preview: true`) built from the current teams.
 
@@ -214,6 +225,16 @@ JSON bodies. Admin calls need `Authorization: Bearer <token>`.
 | POST | `/api/event/reset` | Back to setup (archives a finished night) |
 | POST | `/api/matches/:id/action` | `start`, `pause`, `restart`, `ball {ball}`, `groups {groupA}`, `timer {op: set\|add\|reset, minutes}`, `winner {slot, reason?}`, `undo` |
 | POST | `/api/rounds/:round/action` | `start` (shared start time), `pause`, `add {minutes}` for every playable table in the round |
+| GET | `/api/ai/settings` | `{hasKey, keyHint, model, weakPassword, sections, terms}` (the key itself is never returned) |
+| PUT | `/api/ai/settings` | `{apiKey?, model?}` |
+| DELETE | `/api/ai/key` | Remove the key |
+| GET | `/api/ai/chats` | Chat list |
+| POST | `/api/ai/chats` | `{message, lang}`: create a chat with its first question and answer |
+| GET | `/api/ai/chats/:id` | One chat with its messages |
+| POST | `/api/ai/chats/:id/messages` | `{message}`: ask a follow-up |
+| DELETE | `/api/ai/chats/:id` | Delete a chat |
+
+All `/api/ai/*` routes are admin only.
 
 ---
 
@@ -222,6 +243,11 @@ JSON bodies. Admin calls need `Authorization: Bearer <token>`.
 - Only the admin can change anything. Everything is publicly readable.
 - Admin password compared in constant time. The default is `poolmasters`, and the server warns until `ADMIN_PASSWORD` is set.
 - All user text is HTML-escaped. Bodies capped at 16 KB. Static serving is protected against path traversal.
+- **Gemini API key:** only the admin can set, replace or remove it, and no route or screen ever returns it (only its last 4 characters). It is encrypted with AES-256-GCM using a key derived from `ADMIN_PASSWORD` (scrypt) and stored in `data/secrets.json`, apart from `db.json`. Changing the admin password makes it unreadable, so it must be entered again.
+- A key can't be saved while the server uses the default password, which is public.
+- The key goes to Google in the `x-goog-api-key` header, never in a URL, and redirects are refused. Google's error text is never passed on.
+- Chats are not in the public state or the live stream. They are stored unencrypted in `db.json`, so don't put secrets in them.
+- Gemini's answers are escaped before formatting, and links are not rendered. A Content Security Policy blocks inline and third-party scripts.
 - There is no HTTPS by itself. Put the app behind a TLS proxy (or the Cloudflare tunnel) when it is exposed beyond the local network.
 
 ---

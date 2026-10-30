@@ -8,6 +8,7 @@ const crypto = require('node:crypto');
 const store = require('./src/store');
 const auth = require('./src/auth');
 const tournament = require('./src/tournament');
+const ai = require('./src/ai');
 const { HttpError, fail } = require('./src/errors');
 
 const PORT = Number(process.env.PORT) || 3000;
@@ -16,8 +17,15 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const MAX_BODY_BYTES = 16 * 1024;
 const MAX_TEAMS = 32;
+const WEAK_PASSWORD = ADMIN_PASSWORD === 'poolmasters';
+const MAX_CHATS = 200;
+const MAX_CHAT_MESSAGES = 400;
+const MAX_MESSAGE_CHARS = 4000;
+const MAX_CONTEXT_MESSAGES = 41; // odd, so the part we send always starts with a question
+const AI_PER_MINUTE = 20;
 
 const db = store.load();
+ai.loadKey(ADMIN_PASSWORD);
 // Bumped on every change so pollers can skip re-downloading unchanged state.
 // Seeded with the boot time so a restart never matches a version a client already holds.
 let stateVersion = Date.now();
@@ -124,10 +132,11 @@ function publicState() {
 
 const routes = [];
 
-function route(method, pattern, handler) {
+/** `quiet` routes change nothing public, so they save without a broadcast to every viewer. */
+function route(method, pattern, handler, { quiet = false } = {}) {
   const keys = [];
   const re = new RegExp(`^${pattern.replace(/:(\w+)/g, (_, key) => (keys.push(key), '([^/]+)'))}$`);
-  routes.push({ method, re, keys, handler });
+  routes.push({ method, re, keys, handler, quiet });
 }
 
 // Auth --------------------------------------------------------------------
@@ -264,6 +273,121 @@ route('POST', '/api/rounds/:round/action', ({ session, params, body }) => {
   tournament.roundAction(db.event, Number(params.round), body);
 });
 
+// Gemini (admin only; nothing here is part of the public state) ------------
+
+const aiModel = () => db.ai.model || ai.DEFAULT_MODEL;
+
+const aiSettings = () => ({
+  hasKey: ai.hasKey(),
+  keyHint: ai.keyHint(),
+  model: aiModel(),
+  weakPassword: WEAK_PASSWORD,
+  ...ai.rulesInfo(),
+});
+
+const chatSummary = ({ id, title, updatedAt, messages }) => ({ id, title, updatedAt, count: messages.length });
+const findChat = (id) => db.chats.find((c) => c.id === id) || fail(404, 'Chat not found.');
+
+function cleanMessage(raw) {
+  const text = String(raw ?? '').trim();
+  if (!text) fail(400, 'Type a message first.');
+  if (text.length > MAX_MESSAGE_CHARS) fail(400, `Messages can be at most ${MAX_MESSAGE_CHARS} characters.`);
+  return text;
+}
+
+// A leaked admin session should not be able to run up the bill.
+let aiCalls = [];
+
+function checkAiRate() {
+  const cutoff = Date.now() - 60 * 1000;
+  aiCalls = aiCalls.filter((at) => at > cutoff);
+  if (aiCalls.length >= AI_PER_MINUTE) fail(429, 'Too many questions. Wait a minute and try again.');
+  aiCalls.push(Date.now());
+}
+
+function askGemini(lang, messages) {
+  if (!ai.hasKey()) fail(409, 'Add a Gemini API key in the settings first.');
+  checkAiRate();
+  return ai.ask(aiModel(), ai.systemPrompt(lang, db.event.clockMinutes || 15), messages.slice(-MAX_CONTEXT_MESSAGES));
+}
+
+route('GET', '/api/ai/settings', ({ session }) => {
+  requireAdmin(session);
+  return aiSettings();
+});
+
+route('PUT', '/api/ai/settings', async ({ session, body }) => {
+  requireAdmin(session);
+  if (body.model !== undefined) {
+    const model = String(body.model).trim();
+    if (model && !/^[a-z0-9][a-z0-9.-]{0,63}$/.test(model)) fail(400, 'That is not a valid model name.');
+    db.ai.model = model || null;
+  }
+  if (body.apiKey) {
+    if (WEAK_PASSWORD) fail(409, 'Set your own ADMIN_PASSWORD before adding an API key.');
+    const key = String(body.apiKey).trim();
+    if (!/^[\w.-]{20,200}$/.test(key)) fail(400, 'That does not look like a Gemini API key.');
+    await ai.verifyKey(key);
+    ai.saveKey(key, ADMIN_PASSWORD);
+  }
+  return aiSettings();
+}, { quiet: true });
+
+route('DELETE', '/api/ai/key', ({ session }) => {
+  requireAdmin(session);
+  ai.clearKey();
+  return aiSettings();
+}, { quiet: true });
+
+route('GET', '/api/ai/chats', ({ session }) => {
+  requireAdmin(session);
+  return { chats: [...db.chats].sort((a, b) => b.updatedAt - a.updatedAt).map(chatSummary) };
+});
+
+route('GET', '/api/ai/chats/:id', ({ session, params }) => {
+  requireAdmin(session);
+  return findChat(params.id);
+});
+
+/** A chat only comes into being with a first question that Gemini answered, so there are no empty chats. */
+route('POST', '/api/ai/chats', async ({ session, body }) => {
+  requireAdmin(session);
+  if (db.chats.length >= MAX_CHATS) fail(409, 'You have too many chats. Delete some first.');
+  const text = cleanMessage(body.message);
+  const lang = body.lang === 'nl' ? 'nl' : 'en';
+  const answer = await askGemini(lang, [{ role: 'user', text }]);
+  const at = Date.now();
+  const chat = {
+    id: auth.newId(),
+    title: text.replace(/\s+/g, ' ').slice(0, 60),
+    lang,
+    createdAt: at,
+    updatedAt: at,
+    messages: [{ role: 'user', text, at }, { role: 'model', text: answer, at }],
+  };
+  db.chats.push(chat);
+  return chat;
+}, { quiet: true });
+
+route('POST', '/api/ai/chats/:id/messages', async ({ session, params, body }) => {
+  requireAdmin(session);
+  const chat = findChat(params.id);
+  if (chat.messages.length >= MAX_CHAT_MESSAGES) fail(409, 'This chat is full. Start a new one.');
+  const text = cleanMessage(body.message);
+  const answer = await askGemini(chat.lang, [...chat.messages, { role: 'user', text }]);
+  findChat(params.id); // it may have been deleted while we waited
+  const at = Date.now();
+  chat.messages.push({ role: 'user', text, at }, { role: 'model', text: answer, at });
+  chat.updatedAt = at;
+  return chat;
+}, { quiet: true });
+
+route('DELETE', '/api/ai/chats/:id', ({ session, params }) => {
+  requireAdmin(session);
+  findChat(params.id);
+  db.chats = db.chats.filter((c) => c.id !== params.id);
+}, { quiet: true });
+
 // ---------------------------------------------------------------- live updates (SSE)
 
 const clients = new Set();
@@ -333,7 +457,7 @@ async function handleApi(req, res, url) {
     const params = Object.fromEntries(r.keys.map((key, i) => [key, decodeURIComponent(match[i + 1])]));
     const body = req.method === 'GET' ? {} : await readJson(req);
     const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '') || null;
-    const result = r.handler({
+    const result = await r.handler({
       params,
       body,
       query: url.searchParams,
@@ -343,9 +467,11 @@ async function handleApi(req, res, url) {
     });
 
     if (req.method !== 'GET') {
-      stateVersion += 1;
       store.save(db);
-      broadcast();
+      if (!r.quiet) {
+        stateVersion += 1;
+        broadcast();
+      }
     }
     return sendJson(res, 200, result ?? { ok: true });
   }
@@ -360,6 +486,22 @@ const MIME = {
   '.png': 'image/png',
   '.ico': 'image/x-icon',
   '.json': 'application/json',
+};
+
+// The admin token sits in the browser, so injected scripts must not be able to run or phone home.
+const SECURITY_HEADERS = {
+  'Content-Security-Policy': [
+    "default-src 'self'",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    'font-src https://fonts.gstatic.com',
+    "img-src 'self' data:",
+    "base-uri 'none'",
+    "object-src 'none'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+  ].join('; '),
+  'X-Content-Type-Options': 'nosniff',
+  'Referrer-Policy': 'no-referrer',
 };
 
 function serveStatic(res, pathname) {
@@ -379,7 +521,7 @@ function serveStatic(res, pathname) {
       if (path.extname(rel)) return sendJson(res, 404, { error: 'Not found.' });
       file = path.join(PUBLIC_DIR, 'index.html');
     }
-    res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-cache' });
+    res.writeHead(200, { ...SECURITY_HEADERS, 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-cache' });
     fs.createReadStream(file).pipe(res);
   });
 }
@@ -392,9 +534,9 @@ const server = http.createServer(async (req, res) => {
     if (req.method !== 'GET' && req.method !== 'HEAD') fail(405, 'Method not allowed.');
     serveStatic(res, url.pathname);
   } catch (err) {
-    const status = err.status || 500;
-    if (status >= 500) console.error(err);
-    if (!res.headersSent) sendJson(res, status, { error: status >= 500 ? 'Something went wrong.' : err.message });
+    const known = err instanceof HttpError;
+    if (!known) console.error(err);
+    if (!res.headersSent) sendJson(res, known ? err.status : 500, { error: known ? err.message : 'Something went wrong.' });
   }
 });
 

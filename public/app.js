@@ -46,6 +46,7 @@ const ICON_PATHS = {
   cue: '<path d="M3 21 17 7"/><circle cx="19" cy="5" r="2"/>',
   repeat: '<path d="M17 2l4 4-4 4"/><path d="M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4"/><path d="M21 13v2a3 3 0 0 1-3 3H3"/>',
   table: '<rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="4" cy="8" r="1" fill="currentColor"/><circle cx="20" cy="8" r="1" fill="currentColor"/><circle cx="4" cy="16" r="1" fill="currentColor"/><circle cx="20" cy="16" r="1" fill="currentColor"/>',
+  spark: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 16v4M17 18h4"/>',
   smile: '<circle cx="12" cy="12" r="9"/><path d="M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01"/>',
 };
 
@@ -88,7 +89,12 @@ const S = {
   focusAfter: null, // element id to focus once it shows up (e.g. a team just added)
   fx: emptyFx(), // what changed in the last update, so only that animates
   counts: new Map(), // last shown value of each animated counter
+  ai: emptyAi(),
 };
+
+function emptyAi() {
+  return { tried: false, status: null, chats: [], open: { id: null, messages: [] }, sending: false, draft: '', stick: false };
+}
 
 function emptyFx() {
   return { potted: new Set(), unpotted: new Set(), finished: new Set(), started: new Set(), champion: false };
@@ -817,7 +823,7 @@ function adminView() {
   const tabBtn = (id, label, ic, badge = '') =>
     `<button class="tab ${tab === id ? 'on' : ''}" data-action="tab" data-tab="${id}" role="tab" aria-selected="${tab === id}">${icon(ic)}<span>${label}</span>${badge}</button>`;
   const liveCount = e.status === 'live' ? e.matches.filter((m) => m.status === 'live').length : 0;
-  const body = { tables: tablesPanel, teams: teamsPanel, event: eventPanel }[tab](e);
+  const body = { tables: tablesPanel, teams: teamsPanel, event: eventPanel, ai: aiPanel }[tab](e);
   return `
   <div class="admin-head anim">
     <div><span class="eyebrow">${t('admin.eyebrow')}</span><h1>${esc(e.name)}</h1></div>
@@ -825,6 +831,7 @@ function adminView() {
       ${tabBtn('tables', t('admin.tabTables'), 'grid', liveCount ? `<span class="tab-badge">${liveCount}</span>` : '')}
       ${tabBtn('teams', t('teams'), 'users', `<span class="tab-count">${S.state.teams.length}</span>`)}
       ${tabBtn('event', t('admin.tabEvent'), 'gear')}
+      ${tabBtn('ai', t('admin.tabAi'), 'spark')}
     </div>
   </div>
   ${body}`;
@@ -919,7 +926,172 @@ function eventPanel(e) {
           : `<button class="btn ghost danger-text" data-action="event-reset">${icon('rotate')} ${e.status === 'done' ? t('ev.new') : t('ev.reset')}</button>`}
       </div>
     </div>
+    ${aiSettingsCard()}
   </div>`;
+}
+
+function aiSettingsCard() {
+  const a = S.ai.status;
+  if (!a) return '';
+  return `<div class="card">
+    <div class="card-head"><h3>${t('ai.settings')}</h3>${a.hasKey ? pill('•••• ' + esc(a.keyHint), 'green') : ''}</div>
+    ${a.weakPassword ? `<p class="ai-warn">${icon('alert')}<span>${t('ai.weak')}</span></p>` : ''}
+    <form data-form="ai-settings" class="stack" autocomplete="off">
+      <label class="field"><span>${t('ai.key')}</span><input id="ai-key" name="apiKey" type="password" autocomplete="new-password" spellcheck="false" maxlength="200" placeholder="${t('ai.keyNew')}" ${a.weakPassword ? 'disabled' : ''}></label>
+      <p class="muted small">${a.hasKey ? `${t('ai.keySaved', { hint: esc(a.keyHint) })} ` : ''}${t('ai.keyHelp')}</p>
+      <label class="field"><span>${t('ai.model')}</span><input id="ai-model" name="model" maxlength="64" spellcheck="false" value="${esc(a.model)}"></label>
+      <div class="btn-row">
+        <button class="btn primary" type="submit">${icon('check')} ${t('save')}</button>
+        ${a.hasKey ? `<button class="btn ghost danger-text" type="button" data-action="ai-key-del">${icon('trash')} ${t('ai.keyRemove')}</button>` : ''}
+      </div>
+    </form>
+  </div>`;
+}
+
+/* ---------------------------------------------------------------- Ask Gemini */
+
+function aiPanel() {
+  const a = S.ai;
+  if (!a.status) return `<div class="loading">${t('loading')}</div>`;
+  if (!a.status.hasKey && !a.chats.length) {
+    return emptyState(t('ai.noKeyTitle'), t('ai.noKeyBody'), 3, `<button class="btn primary" data-action="tab" data-tab="event">${icon('gear')} ${t('ai.goSettings')}</button>`);
+  }
+  const { open } = a;
+  const list = a.chats.length
+    ? a.chats.map((c) => `<div class="ai-chat ${c.id === open.id ? 'on' : ''}">
+        <button class="ai-chat-open" data-action="ai-open" data-id="${c.id}"><span class="truncate">${esc(c.title)}</span><small>${aiWhen(c.updatedAt)}</small></button>
+        <button class="icon-btn danger" data-action="ai-del" data-id="${c.id}" title="${t('ai.delete')}" aria-label="${t('ai.delete')}">${icon('trash')}</button>
+      </div>`).join('')
+    : `<p class="muted small">${t('ai.noChats')}</p>`;
+  const bubbles = open.messages.map((m) => `<div class="ai-msg ${m.role}">
+      <span class="ai-who">${m.role === 'user' ? t('ai.you') : `${icon('spark')} Gemini`}</span>
+      <div class="ai-text">${m.role === 'user' ? esc(m.text).replace(/\n/g, '<br>') : markdown(m.text)}</div>
+    </div>`).join('');
+  const intro = `<div class="ai-intro"><span class="auth-icon">${icon('spark')}</span><h2>${t('ai.introTitle')}</h2><p class="muted">${t('ai.introBody')}</p></div>`;
+  return `<div class="ai anim">
+    <aside class="ai-side">
+      <button class="btn primary block" data-action="ai-new">${icon('plus')} ${t('ai.new')}</button>
+      <div class="ai-list" data-scroll-id="ai-list">${list}</div>
+    </aside>
+    <section class="ai-main">
+      <div class="ai-log" data-scroll-id="ai-log" aria-live="polite">
+        ${open.messages.length ? '' : intro}
+        <p class="ai-attached">${icon('book')} ${t('ai.attached', { sections: a.status.sections, terms: a.status.terms })}</p>
+        ${bubbles}
+        ${open.pending ? `<div class="ai-msg model"><span class="ai-who">${icon('spark')} Gemini</span><div class="ai-text ai-dots" role="status" aria-label="${t('ai.thinking')}"><i></i><i></i><i></i></div></div>` : ''}
+      </div>
+      ${a.status.hasKey
+        ? `<form data-form="ai-send" class="ai-compose">
+            <textarea id="ai-input" name="message" rows="2" maxlength="4000" placeholder="${t('ai.placeholder')}" aria-label="${t('ai.placeholder')}">${esc(a.draft)}</textarea>
+            <button class="btn primary" type="submit" ${a.sending ? 'disabled' : ''}>${icon('arrowRight')} ${t('ai.send')}</button>
+            <p class="muted xs">${t('ai.hint')}</p>
+          </form>`
+        : `<div class="ai-compose"><p class="muted small">${t('ai.noKeyInline')}</p><button class="btn ghost" data-action="tab" data-tab="event">${icon('gear')} ${t('ai.goSettings')}</button></div>`}
+    </section>
+  </div>`;
+}
+
+function aiWhen(ts) {
+  const d = new Date(ts);
+  const today = d.toDateString() === new Date().toDateString();
+  return today ? clockTime(ts) : d.toLocaleDateString(locale(), { day: 'numeric', month: 'short' });
+}
+
+/** Gemini answers in Markdown. Everything is escaped first, and links are left out on purpose. */
+function markdown(src) {
+  const inline = (s) =>
+    s
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
+      .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
+      .replace(/(^|[\s(])\*([^*\s][^*]*)\*/g, '$1<i>$2</i>');
+  const out = [];
+  let list = null;
+  let code = null;
+  const closeList = () => {
+    if (list) out.push(`</${list}>`);
+    list = null;
+  };
+  for (const raw of esc(src).split('\n')) {
+    if (raw.trim().startsWith('```')) {
+      closeList();
+      if (code) out.push(`<pre>${code.join('\n')}</pre>`);
+      code = code ? null : [];
+      continue;
+    }
+    if (code) {
+      code.push(raw);
+      continue;
+    }
+    const item = /^\s*(?:([-*+])|\d+[.)])\s+(.*)$/.exec(raw);
+    const heading = /^#{1,6}\s+(.*)$/.exec(raw);
+    if (item) {
+      const kind = item[1] ? 'ul' : 'ol';
+      if (list !== kind) {
+        closeList();
+        out.push(`<${kind}>`);
+        list = kind;
+      }
+      out.push(`<li>${inline(item[2])}</li>`);
+      continue;
+    }
+    closeList();
+    if (heading) out.push(`<h4>${inline(heading[1])}</h4>`);
+    else if (raw.trim()) out.push(`<p>${inline(raw)}</p>`);
+  }
+  closeList();
+  if (code) out.push(`<pre>${code.join('\n')}</pre>`);
+  return out.join('');
+}
+
+async function loadAi() {
+  const a = S.ai;
+  if (a.tried) return;
+  a.tried = true;
+  await run(async () => {
+    const [status, list] = await Promise.all([api('GET', '/api/ai/settings'), api('GET', '/api/ai/chats')]);
+    a.status = status;
+    a.chats = list.chats;
+  });
+  if (a === S.ai) render();
+}
+
+async function aiRefreshList(a) {
+  a.chats = (await api('GET', '/api/ai/chats')).chats;
+}
+
+async function aiSend() {
+  const a = S.ai;
+  const input = document.getElementById('ai-input');
+  const text = input.value.trim();
+  if (!text || a.sending) return;
+  const chat = a.open;
+  a.sending = true;
+  chat.pending = true;
+  a.draft = '';
+  input.value = '';
+  chat.messages.push({ role: 'user', text, at: Date.now() });
+  a.stick = true;
+  render();
+  try {
+    const res = chat.id
+      ? await api('POST', `/api/ai/chats/${chat.id}/messages`, { message: text })
+      : await api('POST', '/api/ai/chats', { message: text, lang: S.lang });
+    chat.id = res.id;
+    chat.messages = res.messages;
+    await aiRefreshList(a);
+  } catch (err) {
+    chat.messages.pop();
+    toast(err.message, 'error');
+    if (a.open === chat) {
+      a.draft = text; // nothing was saved, so give the question back
+      const el = document.getElementById('ai-input');
+      if (el && !el.value) el.value = text;
+    }
+  }
+  a.sending = false;
+  chat.pending = false;
+  a.stick = a.open === chat;
+  if (a === S.ai) render();
 }
 
 /* ---------------------------------------------------------------- Tables (control room) */
@@ -1310,7 +1482,7 @@ function captureUi() {
     }
   }
   const open = [...$app.querySelectorAll('details[id][open]')].map((d) => d.id);
-  const scroll = [...$app.querySelectorAll('[data-scroll-id]')].map((el) => [el.dataset.scrollId, el.scrollLeft]);
+  const scroll = [...$app.querySelectorAll('[data-scroll-id]')].map((el) => [el.dataset.scrollId, el.scrollLeft, el.scrollTop]);
   return { fields, focus, open, scroll };
 }
 
@@ -1322,9 +1494,11 @@ function restoreUi({ fields, focus, open, scroll }) {
     else el.value = f.value;
   }
   open.forEach((id) => document.getElementById(id)?.setAttribute('open', ''));
-  for (const [id, left] of scroll) {
+  for (const [id, left, top] of scroll) {
     const el = $app.querySelector(`[data-scroll-id="${id}"]`);
-    if (el) el.scrollLeft = left;
+    if (!el) continue;
+    el.scrollLeft = left;
+    el.scrollTop = top;
   }
   const el = focus && document.getElementById(focus.id);
   if (el) {
@@ -1347,6 +1521,12 @@ function render() {
   $nav.innerHTML = navView(r);
   $app.innerHTML = view(r);
   if (snapshot) restoreUi(snapshot);
+  if (S.ai.stick) {
+    S.ai.stick = false;
+    const log = $app.querySelector('.ai-log');
+    if (log) log.scrollTop = log.scrollHeight;
+  }
+  if (isAdmin() && r.name === 'admin') loadAi();
   S.renderedKey = S.state ? location.hash : null; // the loading screen doesn't count as having entered
   filterGlossary();
 
@@ -1427,6 +1607,40 @@ async function onAction(action, d) {
     case 'jump': {
       const target = document.getElementById(d.target);
       return target?.scrollIntoView({ behavior: REDUCED_MOTION ? 'auto' : 'smooth', block: 'start' });
+    }
+
+    // Gemini
+    case 'ai-new':
+      if (S.ai.open.id) S.ai.open = { id: null, messages: [] }; // only a blank page: the chat starts with the first question
+      render();
+      return document.getElementById('ai-input')?.focus();
+    case 'ai-open': {
+      const a = S.ai;
+      const chat = { id: d.id, messages: [] };
+      a.open = chat;
+      render();
+      const res = await api('GET', `/api/ai/chats/${d.id}`);
+      if (a.open !== chat) return;
+      chat.messages = res.messages;
+      a.stick = true;
+      return render();
+    }
+    case 'ai-del': {
+      const a = S.ai;
+      const title = a.chats.find((c) => c.id === d.id)?.title ?? '';
+      const ok = await confirmDialog({ title: t('ai.deleteTitle'), body: t('ai.deleteBody', { title: esc(title) }), confirmLabel: t('ai.deleteOk'), danger: true });
+      if (!ok) return;
+      await api('DELETE', `/api/ai/chats/${d.id}`);
+      if (a.open.id === d.id) a.open = { id: null, messages: [] };
+      await aiRefreshList(a);
+      return render();
+    }
+    case 'ai-key-del': {
+      const ok = await confirmDialog({ title: t('ai.keyRemoveTitle'), body: t('ai.keyRemoveBody'), confirmLabel: t('ai.keyRemove'), danger: true });
+      if (!ok) return;
+      S.ai.status = await api('DELETE', '/api/ai/key');
+      toast(t('toast.aiKeyRemoved'));
+      return render();
     }
 
     // Teams
@@ -1542,6 +1756,15 @@ async function onForm(name, data) {
         thirdPlace: data.get('thirdPlace') === 'on',
       });
       return toast(t('toast.saved'), 'success');
+    case 'ai-settings': {
+      const input = document.getElementById('ai-key');
+      S.ai.status = await api('PUT', '/api/ai/settings', { apiKey: data.get('apiKey') || undefined, model: data.get('model') });
+      input.value = '';
+      render();
+      return toast(t('toast.aiSaved'), 'success');
+    }
+    case 'ai-send':
+      return aiSend();
   }
 }
 
@@ -1564,6 +1787,10 @@ document.addEventListener('focusout', (e) => {
 });
 
 document.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.target.id === 'ai-input') {
+    e.preventDefault();
+    e.target.form.requestSubmit();
+  }
   if (e.key === 'Enter' && e.target.matches?.('input[data-edit$="-name"]')) {
     e.preventDefault();
     e.target.blur();
@@ -1582,6 +1809,7 @@ document.addEventListener('change', (e) => {
 });
 
 document.addEventListener('input', (e) => {
+  if (e.target.id === 'ai-input') S.ai.draft = e.target.value;
   if (e.target.dataset?.filter === 'glossary') {
     S.glossQuery = e.target.value;
     filterGlossary();
@@ -1605,6 +1833,7 @@ window.addEventListener('hashchange', () => {
 function setSession(token, me) {
   S.token = token;
   S.me = me;
+  S.ai = emptyAi(); // chats never outlive the session
   writeStored('pm_token', token);
   render();
 }
