@@ -52,5 +52,5 @@ server.js          HTTP server, REST routes, SSE live updates, static files
 src/tournament.js  schedule (round robin + knockout), standings, match and round actions, clock
 src/auth.js        admin password check, tokens, lockouts
 src/store.js       JSON persistence
-public/            single-page app (index.html, app.js, styles.css)
+public/            single-page app (index.html, app.js, i18n.js with English + Dutch text, styles.css)
 ```

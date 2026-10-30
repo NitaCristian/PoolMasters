@@ -116,7 +116,8 @@ setup ──(Start tournament)──▶ live ──(last match decided)──▶
 |---|---|---|
 | `#/` | **Live** (landing) | *Setup:* "Racking up soon" hero with an animated rack, team cards with group badges, Hall of fame. *Live / done:* champion banner (when done), tournament name, **round track** (8 segments filling as matches finish, knockout in gold), **stat tiles** (matches played, balls pocketed, 8-balls sunk, average match time), **On the tables** (one mini pool table per table for the current round: teams, live clock, balls left, suit balls, resting teams), **Group standings**, **Road to the final** (QF → SF → Final + 3rd place), **Leaders** (most wins, balls cleared, fastest win, biggest margin), **Hall of fame** |
 | `#/schedule` | **Schedule grid** | 8 rows (rounds) × 4 columns (tables) + a **Resting** column. Row labels show the stage and the planned start time (start + (r−1) × clock). Group 1 cells are green, Group 2 blue, knockout gold. Unused tables in rounds 7–8 are hatched **Open play**. The current round is highlighted with a "Now" tag, live cells glow with a running clock, winners get a check and losers are struck through. During setup it is a labelled preview. Admins can click a cell to jump to that round in the control room. |
-| `#/rules` | **Rules** | On-the-table rules (open table, only the 8 is called, legal shot, fouls/ball-in-hand, losing on the 8). The format as a 4-step flow (group stage → QF → SF → Final). Clock, standings, ball differential and schedule rules. |
+| `#/rules` | **Rules: Basics** | On-the-table rules (open table, only the 8 is called, legal shot, fouls/ball-in-hand, losing on the 8). The format as a 4-step flow (group stage → QF → SF → Final). Clock, standings, ball differential and schedule rules. |
+| `#/rules/full` | **Rules: Full rules & glossary** | The complete rulebook in 13 numbered sections (table & equipment, racking, the break, open table, turns, legal shot, fouls, ball in hand, shooting the 8, time limit, team play, conduct & disputes, tournament format), with a sticky table of contents. Points that are choices for this tournament carry a gold **House rule** tag. A searchable A–Z **glossary** of 53 terms shows each term with its translation in the other language. The last rules tab you opened is remembered. |
 | `#/admin` | **Control room** | Sign-in, then three tabs: **Tables**, **Teams**, **Tournament** (the last tab is remembered per device) |
 
 ### 5.1 Control room: Tables tab
@@ -144,6 +145,12 @@ Name, match clock and 3rd-place settings; a plain-language format summary for th
 Dark pool-hall palette (near-black, emerald felt, gold trophy accents), wood-rimmed felt tables, Space Grotesk headings and Inter body text. Responsive down to 360 px: the schedule grid and knockout scroll sideways inside their own containers, with the round labels sticky.
 
 ---
+
+### 5.6 Languages
+- Everything is available in **English and Dutch**: every screen, button, popup, toast, the rules, the rulebook and the glossary. Server error messages are translated on the client.
+- A switch with flags (🇬🇧 EN / 🇳🇱 NL) sits in the top bar on every page. The choice is saved in the browser (`pm_lang`) and kept on later visits. The first visit follows the browser language (Dutch browsers start in Dutch).
+- Dutch uses the usual pool terms: **helen / halven** for solids / stripes, **kwartfinale (KF) / halve finale (HF)**, **troostfinale** for the 3rd-place match.
+- All text lives in `public/i18n.js` (`STRINGS`, `RULEBOOK`, `GLOSSARY`). Add a key to both languages when adding text.
 
 ## 6. Real-time model
 

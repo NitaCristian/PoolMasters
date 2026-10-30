@@ -8,11 +8,9 @@ const BALL_COLORS = ['', '#f5c518', '#1e4fd8', '#d92b2b', '#6b2fb8', '#f47a14', 
 const SOLIDS = [1, 2, 3, 4, 5, 6, 7];
 const STRIPES = [9, 10, 11, 12, 13, 14, 15];
 const GROUPS = {
-  solids: { label: 'Solids', icon: 1, balls: SOLIDS },
-  stripes: { label: 'Stripes', icon: 9, balls: STRIPES },
+  solids: { icon: 1, balls: SOLIDS },
+  stripes: { icon: 9, balls: STRIPES },
 };
-const GROUP_NAMES = ['Group 1', 'Group 2'];
-const STAGE = { group: 'Group stage', qf: 'Quarterfinals', sf: 'Semifinals', final: 'Final', third: '3rd place' };
 const SSE_TIMEOUT_MS = 5000; // no live update by then -> switch to polling
 const POLL_MS = 2000;
 const REDUCED_MOTION = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -43,12 +41,23 @@ const ICON_PATHS = {
   hand: '<path d="M18 11V6a2 2 0 0 0-4 0M14 10V4a2 2 0 0 0-4 0v2M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.9-6-2.4l-3.6-3.6a2 2 0 0 1 2.8-2.8L7 15"/>',
   alert: '<path d="M12 3 2 21h20z"/><path d="M12 10v5M12 18h.01"/>',
   book: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5z"/><path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+  triangle: '<path d="M12 4 3 20h18z"/>',
+  cue: '<path d="M3 21 17 7"/><circle cx="19" cy="5" r="2"/>',
+  repeat: '<path d="M17 2l4 4-4 4"/><path d="M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4"/><path d="M21 13v2a3 3 0 0 1-3 3H3"/>',
+  table: '<rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="4" cy="8" r="1" fill="currentColor"/><circle cx="20" cy="8" r="1" fill="currentColor"/><circle cx="4" cy="16" r="1" fill="currentColor"/><circle cx="20" cy="16" r="1" fill="currentColor"/>',
+  smile: '<circle cx="12" cy="12" r="9"/><path d="M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01"/>',
 };
 
 const icon = (name) =>
   `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON_PATHS[name]}</svg>`;
 
 const CROWN = `<svg class="crown" viewBox="0 0 24 24" role="img" aria-label="Champion"><path d="M2.5 7.5l5 4.2L12 4l4.5 7.7 5-4.2-2.1 11.3H4.6z" fill="currentColor"/><rect x="4.6" y="19.8" width="14.8" height="2" rx="1" fill="currentColor"/></svg>`;
+
+const FLAGS = {
+  en: '<svg class="flag" viewBox="0 0 60 30" aria-hidden="true"><clipPath id="flag-uk"><path d="M30,15h30v15zv15h-30zh-30v-15zv-15h30z"/></clipPath><path d="M0,0v30h60v-30z" fill="#012169"/><path d="M0,0 60,30M60,0 0,30" stroke="#fff" stroke-width="6"/><path d="M0,0 60,30M60,0 0,30" clip-path="url(#flag-uk)" stroke="#C8102E" stroke-width="4"/><path d="M30,0v30M0,15h60" stroke="#fff" stroke-width="10"/><path d="M30,0v30M0,15h60" stroke="#C8102E" stroke-width="6"/></svg>',
+  nl: '<svg class="flag" viewBox="0 0 9 6" aria-hidden="true"><path fill="#AE1C28" d="M0 0h9v2H0z"/><path fill="#fff" d="M0 2h9v2H0z"/><path fill="#21468B" d="M0 4h9v2H0z"/></svg>',
+};
 
 /* =====================================================================
    State
@@ -63,6 +72,7 @@ const S = {
   state: null, // server snapshot (pushed over SSE)
   me: { role: null },
   token: readStored('pm_token'),
+  lang: initialLang(),
   offset: 0, // serverTime - local time, so every device shows the same clock
   online: false,
   events: null,
@@ -73,6 +83,8 @@ const S = {
   renderedKey: null,
   adminTab: readStored('pm_tab'),
   adminRound: null, // null = follow the current round
+  rulesTab: readStored('pm_rules') === 'full' ? 'full' : 'basics',
+  glossQuery: '',
   focusAfter: null, // element id to focus once it shows up (e.g. a team just added)
   fx: emptyFx(), // what changed in the last update, so only that animates
   counts: new Map(), // last shown value of each animated counter
@@ -99,6 +111,44 @@ function writeStored(key, value) {
   }
 }
 
+/** The saved choice, else the browser's language. */
+function initialLang() {
+  const saved = readStored('pm_lang');
+  if (saved === 'en' || saved === 'nl') return saved;
+  return /^nl\b/i.test(navigator.language || '') ? 'nl' : 'en';
+}
+
+/* =====================================================================
+   Translation (strings live in i18n.js)
+   ===================================================================== */
+
+/** Looks up a string; `{name}` placeholders are filled from vars (already escaped by the caller when HTML). */
+function t(key, vars = {}) {
+  const s = STRINGS[S.lang]?.[key] ?? STRINGS.en[key] ?? key;
+  if (typeof s === 'function') return s(vars);
+  return s.replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? '');
+}
+
+/** "3 teams" / "3 teams", "1 ball" / "1 bal". */
+function plural(n, word) {
+  const forms = WORDS[S.lang][word] ?? WORDS.en[word];
+  return `${n} ${n === 1 ? forms[0] : forms[1]}`;
+}
+
+const ordinal = (n) => t('ordinal', { n });
+const locale = () => (S.lang === 'nl' ? 'nl-NL' : 'en-GB');
+
+/** Server errors are English; show them in the current language when we know them. */
+function trError(msg) {
+  if (S.lang === 'en' || !msg) return msg;
+  if (ERRORS_NL[msg]) return ERRORS_NL[msg];
+  for (const [re, fn] of ERROR_PATTERNS_NL) {
+    const m = re.exec(msg);
+    if (m) return fn(...m.slice(1));
+  }
+  return msg;
+}
+
 /* =====================================================================
    Helpers
    ===================================================================== */
@@ -110,13 +160,14 @@ const now = () => Date.now() + S.offset;
 const isAdmin = () => S.me.role === 'admin';
 const E = () => S.state.event;
 const team = (id) => S.teams.get(id);
-const teamName = (id) => team(id)?.name ?? 'TBD';
+const teamName = (id) => team(id)?.name ?? t('tbd');
 const activeMembers = (id) => team(id)?.members.filter((m) => m.active) ?? [];
-const memberLine = (id) => activeMembers(id).map((m) => m.name).join(' & ') || 'No active players';
+const memberLine = (id) => activeMembers(id).map((m) => m.name).join(' & ') || t('team.noActive');
 const findMatch = (id) => E().matches.find((m) => m.id === id);
 const matchAt = (round, table) => E().matches.find((m) => m.round === round && m.table === table);
-const ordinal = (n) => n + ({ 1: 'st', 2: 'nd', 3: 'rd' }[n] ?? 'th');
-const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+const groupName = (g) => t('group', { n: g + 1 });
+const suitName = (g) => t(`suit.${g}`);
+const stageName = (stage) => t(`stage.${stage}`);
 
 const groupOf = (m, slot) => {
   if (!m.groupA) return null;
@@ -145,7 +196,7 @@ function fmt(ms) {
   return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
 }
 
-const clockTime = (ts) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+const clockTime = (ts) => new Date(ts).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' });
 
 /** The round being played: the first with an undecided match. */
 function currentRound(e) {
@@ -154,25 +205,25 @@ function currentRound(e) {
 }
 
 function roundStage(e, r) {
-  if (r <= e.groupRounds) return STAGE.group;
+  if (r <= e.groupRounds) return stageName('group');
   const stage = matchAt(r, 1)?.stage;
-  return stage === 'final' ? 'Finals' : STAGE[stage] ?? '';
+  return stage === 'final' ? t('stage.finals') : stage ? stageName(stage) : '';
 }
 
-const roundTitle = (e, r) => `Round ${r}`;
+const roundTitle = (r) => t('round', { n: r });
 
 function shortLabel(m) {
-  if (m.stage === 'qf') return `QF${m.table}`;
-  if (m.stage === 'sf') return `SF${m.table}`;
-  if (m.stage === 'group') return `${GROUP_NAMES[m.group]} · T${m.table}`;
-  return STAGE[m.stage];
+  if (m.stage === 'qf') return t('short.qf', { n: m.table });
+  if (m.stage === 'sf') return t('short.sf', { n: m.table });
+  if (m.stage === 'group') return `${groupName(m.group)} · T${m.table}`;
+  return stageName(m.stage);
 }
 
 function srcLabel(src) {
-  if (!src) return 'TBD';
+  if (!src) return t('tbd');
   if (src.rank) return `${ordinal(src.rank.place)} G${src.rank.group + 1}`;
   const from = findMatch(src.winner ?? src.loser);
-  return `${src.winner ? 'Winner' : 'Loser'} ${from ? shortLabel(from) : ''}`;
+  return t(src.winner ? 'src.winner' : 'src.loser', { match: from ? shortLabel(from) : '' });
 }
 
 const slotName = (m, s) => (m[s] ? teamName(m[s]) : srcLabel(m[s === 'a' ? 'srcA' : 'srcB']));
@@ -189,7 +240,7 @@ async function api(method, url, body) {
   if (S.token) headers.Authorization = `Bearer ${S.token}`;
   const res = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+  if (!res.ok) throw new Error(trError(data.error) || t('err.request', { status: res.status }));
   if (method !== 'GET' && S.polling) refresh(); // show your own change right away, not on the next poll
   return data;
 }
@@ -239,7 +290,8 @@ function ball(n, size = 32, potted = false, extra = '') {
   const kind = n === 8 ? 'eight' : n > 8 ? 'stripe' : 'solid';
   const color = BALL_COLORS[n > 8 ? n - 8 : n];
   const cls = `ball ${kind}${potted ? ' potted' : ''}${size < 20 ? ' tiny' : ''} ${extra}`;
-  return `<span class="${cls}" style="--c:${color};--size:${size}px" role="img" aria-label="Ball ${n}${potted ? ', pocketed' : ''}"><span class="ball-num">${n}</span></span>`;
+  const label = potted ? t('ball.potted', { n }) : t('ball.n', { n });
+  return `<span class="${cls}" style="--c:${color};--size:${size}px" role="img" aria-label="${label}"><span class="ball-num">${n}</span></span>`;
 }
 
 /** A ball in a match, animated when it just dropped (or came back). */
@@ -261,8 +313,8 @@ function avatar(name, size = '') {
 }
 
 const pill = (label, tone, lead = '') => `<span class="pill ${tone}">${lead}${esc(label)}</span>`;
-const livePill = (label = 'Live', size = '') => pill(label, `green ${size}`, '<span class="live-dot"></span>');
-const groupChip = (g) => `<span class="chip group">${ball(GROUPS[g].icon, 16)}${GROUPS[g].label}</span>`;
+const livePill = (label = t('status.live'), size = '') => pill(label, `green ${size}`, '<span class="live-dot"></span>');
+const groupChip = (g) => `<span class="chip group">${ball(GROUPS[g].icon, 16)}${suitName(g)}</span>`;
 
 function emptyState(title, body, art = 8, extra = '') {
   return `<div class="empty anim">${ball(art, 56, false, 'float')}<h3>${esc(title)}</h3><p class="muted">${esc(body)}</p>${extra}</div>`;
@@ -273,14 +325,14 @@ function statusTag(m, size = 'xs') {
   if (m.status === 'live') {
     return m.timer.durationMs
       ? `<span class="pill green ${size}"><span class="live-dot"></span><span data-timer="${m.id}">${fmt(timeLeft(m))}</span></span>`
-      : livePill('Live', size);
+      : livePill(t('status.live'), size);
   }
-  if (m.status === 'done') return m.result === 'timeout' ? pill('On time', `amber ${size}`) : pill('Final', `gold ${size}`);
+  if (m.status === 'done') return m.result === 'timeout' ? pill(t('status.onTime'), `amber ${size}`) : pill(t('status.final'), `gold ${size}`);
   if (m.status === 'ready') {
-    if (m.startedAt) return pill('Paused', `amber ${size}`);
-    return m.round === currentRound(e) && !e.preview ? pill('Up next', `blue ${size}`) : '';
+    if (m.startedAt) return pill(t('status.paused'), `amber ${size}`);
+    return m.round === currentRound(e) && !e.preview ? pill(t('status.upNext'), `blue ${size}`) : '';
   }
-  return pill('TBD', `muted ${size}`);
+  return pill(t('tbd'), `muted ${size}`);
 }
 
 /* =====================================================================
@@ -290,17 +342,20 @@ function statusTag(m, size = 'xs') {
 function navView(r) {
   const link = (href, name, label) => `<a href="${href}" class="${r.name === name ? 'active' : ''}">${label}</a>`;
   const live = S.state?.event.status === 'live';
+  const langBtn = (code) =>
+    `<button class="${S.lang === code ? 'on' : ''}" data-action="lang" data-lang="${code}" aria-pressed="${S.lang === code}" title="${code === 'en' ? 'English' : 'Nederlands'}">${FLAGS[code]}<span>${code.toUpperCase()}</span></button>`;
   return `<div class="topbar-inner">
     <a class="brand" href="#/">${ball(8, 30, false, 'spin-hover')}<span class="brand-text">Pool<b>Masters</b></span></a>
     <nav class="nav">
-      ${link('#/', 'home', `${live ? '<span class="live-dot"></span>' : ''}Live`)}
-      ${link('#/schedule', 'schedule', 'Schedule')}
-      ${link('#/rules', 'rules', 'Rules')}
-      ${link('#/admin', 'admin', isAdmin() ? `${icon('shield')}<span class="nav-label">Admin</span>` : 'Admin')}
+      ${link('#/', 'home', `${live ? '<span class="live-dot"></span>' : ''}${t('nav.live')}`)}
+      ${link('#/schedule', 'schedule', t('nav.schedule'))}
+      ${link(S.rulesTab === 'full' ? '#/rules/full' : '#/rules', 'rules', t('nav.rules'))}
+      ${link('#/admin', 'admin', isAdmin() ? `${icon('shield')}<span class="nav-label">${t('nav.admin')}</span>` : t('nav.admin'))}
     </nav>
     <div class="topbar-right">
-      <span class="conn ${S.online ? 'on' : ''} ${S.polling ? 'poll' : ''}" title="${!S.online ? 'Reconnecting…' : S.polling ? `Updating every ${POLL_MS / 1000} s` : 'Live'}"></span>
-      ${isAdmin() ? `<button class="icon-btn" data-action="logout" title="Sign out" aria-label="Sign out">${icon('logout')}</button>` : ''}
+      <div class="lang-switch" role="group" aria-label="${t('nav.language')}">${langBtn('en')}${langBtn('nl')}</div>
+      <span class="conn ${S.online ? 'on' : ''} ${S.polling ? 'poll' : ''}" title="${!S.online ? t('conn.offline') : S.polling ? t('conn.polling', { s: POLL_MS / 1000 }) : t('conn.live')}"></span>
+      ${isAdmin() ? `<button class="icon-btn" data-action="logout" title="${t('nav.signOut')}" aria-label="${t('nav.signOut')}">${icon('logout')}</button>` : ''}
     </div>
   </div>`;
 }
@@ -318,27 +373,27 @@ function homeView() {
   ${e.status === 'done' ? championBanner(e) : ''}
   <section class="live-hero anim">
     <div class="lh-copy">
-      <span class="eyebrow">${e.status === 'done' ? 'Final results' : `${roundTitle(e, r)} of ${e.rounds} · ${roundStage(e, r)}`}</span>
+      <span class="eyebrow">${e.status === 'done' ? t('home.finalResults') : t('home.roundOf', { round: roundTitle(r), total: e.rounds, stage: roundStage(e, r) })}</span>
       <h1>${esc(e.name)}</h1>
       ${roundTrack(e, r)}
     </div>
     ${statTiles(e, done)}
   </section>
   ${e.status === 'live' ? `<section class="section anim">
-    <div class="section-head"><h2>${e.matches.some((m) => m.status === 'live') ? livePill('Live') : ''} On the tables</h2>
-      <a class="btn ghost sm" href="#/schedule">${icon('grid')} Full schedule</a></div>
+    <div class="section-head"><h2>${e.matches.some((m) => m.status === 'live') ? livePill() : ''} ${t('home.onTables')}</h2>
+      <a class="btn ghost sm" href="#/schedule">${icon('grid')} ${t('home.fullSchedule')}</a></div>
     ${tablesStrip(e, r)}
   </section>` : ''}
   <section class="section anim">
-    <div class="section-head"><h2>Group standings</h2><span class="muted small">Win = 1 point · top ${e.advance} of each group go through</span></div>
+    <div class="section-head"><h2>${t('home.standings')}</h2><span class="muted small">${t('home.standingsHint', { n: e.advance })}</span></div>
     <div class="standings-grid">${[0, 1].map((g) => standingsCard(e, g)).join('')}</div>
   </section>
   <section class="section anim">
-    <div class="section-head"><h2>Road to the final</h2></div>
+    <div class="section-head"><h2>${t('home.road')}</h2></div>
     ${knockoutView(e)}
   </section>
   <section class="section anim">
-    <div class="section-head"><h2>Leaders</h2></div>
+    <div class="section-head"><h2>${t('home.leaders')}</h2></div>
     ${leaders(e)}
   </section>
   ${historySection()}`;
@@ -351,38 +406,40 @@ function roundTrack(e, r) {
     const ms = e.matches.filter((m) => m.round === i);
     const share = ms.length ? ms.filter((m) => m.winner).length / ms.length : 0;
     const state = share === 1 ? 'done' : i === r && e.status === 'live' ? 'now' : '';
-    segs.push(`<span class="seg-r ${state} ${i > e.groupRounds ? 'ko' : ''}" title="${roundTitle(e, i)} · ${roundStage(e, i)}" style="--fill:${Math.round(share * 100)}%"><i></i><b>${i}</b></span>`);
+    segs.push(`<span class="seg-r ${state} ${i > e.groupRounds ? 'ko' : ''}" title="${roundTitle(i)} · ${roundStage(e, i)}" style="--fill:${Math.round(share * 100)}%"><i></i><b>${i}</b></span>`);
   }
-  return `<div class="round-track" aria-label="Rounds">${segs.join('')}</div>
-    <div class="track-legend"><span>${STAGE.group}</span><span class="ko">Knockout</span></div>`;
+  return `<div class="round-track" aria-label="${t('rounds')}">${segs.join('')}</div>
+    <div class="track-legend"><span>${stageName('group')}</span><span class="ko">${t('stage.knockout')}</span></div>`;
 }
 
 function statTiles(e, done) {
   const finished = e.matches.filter((m) => m.winner && m.startedAt && m.finishedAt);
   const avg = finished.length ? finished.reduce((s, m) => s + (m.finishedAt - m.startedAt), 0) / finished.length : 0;
-  const tile = (key, value, label, ic, suffix = '') =>
-    `<div class="stat"><span class="stat-ic">${icon(ic)}</span><b><span data-count="${key}">${value}</span>${suffix}</b><span>${label}</span></div>`;
+  const tile = (key, value, label, ic) =>
+    `<div class="stat"><span class="stat-ic">${icon(ic)}</span><b><span data-count="${key}">${value}</span></b><span>${label}</span></div>`;
   return `<div class="stat-tiles">
-    ${tile('matches', done, `of ${e.matches.length} matches played`, 'flag')}
-    ${tile('balls', e.matches.reduce((n, m) => n + m.potted.length, 0), 'balls pocketed', 'target')}
-    ${tile('eights', e.matches.filter((m) => m.potted.includes(8)).length, '8-balls sunk', 'zap')}
-    <div class="stat"><span class="stat-ic">${icon('clock')}</span><b>${avg ? fmt(avg) : '—'}</b><span>average match</span></div>
+    ${tile('matches', done, t('stats.matches', { n: e.matches.length }), 'flag')}
+    ${tile('balls', e.matches.reduce((n, m) => n + m.potted.length, 0), t('stats.balls'), 'target')}
+    ${tile('eights', e.matches.filter((m) => m.potted.includes(8)).length, t('stats.eights'), 'zap')}
+    <div class="stat"><span class="stat-ic">${icon('clock')}</span><b>${avg ? fmt(avg) : '—'}</b><span>${t('stats.avg')}</span></div>
   </div>`;
 }
+
+const restingChips = (resting) => resting.map((x) => x.ids.map((id) => `<span class="rest-chip g${x.g}">${esc(teamName(id))}</span>`).join('')).join('');
 
 /** Read-only mini tables for the round in play. */
 function tablesStrip(e, r) {
   const tiles = [];
-  for (let t = 1; t <= e.tables; t++) {
-    const m = matchAt(r, t);
-    tiles.push(m ? miniTable(e, m) : `<div class="mini-table open"><span class="mt-num">Table ${t}</span><span class="muted">Open play</span></div>`);
+  for (let tb = 1; tb <= e.tables; tb++) {
+    const m = matchAt(r, tb);
+    tiles.push(m ? miniTable(m) : `<div class="mini-table open"><span class="mt-num">${t('table', { n: tb })}</span><span class="muted">${t('openPlay')}</span></div>`);
   }
   const resting = restingIn(e, r);
   return `<div class="tables-strip">${tiles.join('')}</div>
-    ${resting.length ? `<p class="resting-line">${icon('pause')} Resting: ${resting.map((x) => x.ids.map((id) => `<span class="chip muted">${esc(teamName(id))}</span>`).join('')).join('')}</p>` : ''}`;
+    ${resting.length ? `<p class="resting-line">${icon('pause')} ${t('resting')}: ${restingChips(resting)}</p>` : ''}`;
 }
 
-function miniTable(e, m) {
+function miniTable(m) {
   const row = (s) => {
     const left = ballsLeft(m, s);
     const g = groupOf(m, s);
@@ -391,11 +448,11 @@ function miniTable(e, m) {
       ${m[s] ? avatar(teamName(m[s]), 'sm') : '<span class="avatar sm ghost">?</span>'}
       <div class="mt-who"><span class="mt-name truncate">${esc(slotName(m, s))}</span>
         ${g ? `<span class="mt-balls">${GROUPS[g].balls.map((n) => matchBall(m, n, 12)).join('')}</span>` : `<span class="mt-sub truncate">${m[s] ? esc(memberLine(m[s])) : ''}</span>`}</div>
-      <span class="mt-left">${m.winner === s ? icon('trophy') : left === null ? '' : `<b>${left}</b><small>left</small>`}</span>
+      <span class="mt-left">${m.winner === s ? icon('trophy') : left === null ? '' : `<b>${left}</b><small>${t('left')}</small>`}</span>
     </div>`;
   };
   return `<div class="mini-table felt st-${m.status} ${S.fx.finished.has(m.id) ? 'just-won' : ''} ${S.fx.started.has(m.id) ? 'kick' : ''}" data-mid="${m.id}">
-    <div class="mt-head"><span class="mt-num">Table ${m.table}</span><span class="mt-tag">${m.stage === 'group' ? GROUP_NAMES[m.group] : STAGE[m.stage]}</span>${statusTag(m)}</div>
+    <div class="mt-head"><span class="mt-num">${t('table', { n: m.table })}</span><span class="mt-tag">${m.stage === 'group' ? groupName(m.group) : stageName(m.stage)}</span>${statusTag(m)}</div>
     ${row('a')}${row('b')}
     ${m.potted.includes(8) ? `<span class="mt-eight">${ball(8, 18)}</span>` : ''}
   </div>`;
@@ -405,9 +462,8 @@ function standingsCard(e, g) {
   const rows = e.standings[g] ?? [];
   const body = rows
     .map((row, i) => {
-      const ko = i === e.advance - 1 ? 'cut' : '';
-      const tb = row.tiebreak ? `<abbr class="tb" title="${row.tiebreak === 'h2h' ? 'Tie broken by head-to-head' : 'Tie broken by ball differential'}">${row.tiebreak === 'h2h' ? 'H2H' : '±'}</abbr>` : '';
-      return `<tr class="${i < e.advance ? 'adv' : ''} ${ko}" data-flip="st-${row.id}">
+      const tb = row.tiebreak ? `<abbr class="tb" title="${t(row.tiebreak === 'h2h' ? 'tb.h2hTitle' : 'tb.ballsTitle')}">${row.tiebreak === 'h2h' ? 'H2H' : '±'}</abbr>` : '';
+      return `<tr class="${i < e.advance ? 'adv' : ''} ${i === e.advance - 1 ? 'cut' : ''}" data-flip="st-${row.id}">
         <td class="pos"><span>${row.place}</span></td>
         <td class="team-cell"><div class="tc-wrap">${avatar(teamName(row.id), 'sm')}<div class="min0"><div class="truncate b">${esc(teamName(row.id))} ${tb}</div><div class="truncate muted xs">${esc(memberLine(row.id))}</div></div></div></td>
         <td>${row.played}</td><td>${row.wins}</td><td>${row.losses}</td>
@@ -417,9 +473,9 @@ function standingsCard(e, g) {
     })
     .join('');
   return `<div class="card standings">
-    <div class="card-head"><h3>${GROUP_NAMES[g]}</h3><span class="muted small">${plural(rows.length, 'team')}</span></div>
+    <div class="card-head"><h3>${groupName(g)}</h3><span class="muted small">${plural(rows.length, 'team')}</span></div>
     <div class="table-scroll"><table class="st-table">
-      <thead><tr><th>#</th><th class="left">Team</th><th title="Played">P</th><th title="Won">W</th><th title="Lost">L</th><th title="Ball differential">+/−</th><th>Pts</th></tr></thead>
+      <thead><tr><th>#</th><th class="left">${t('st.team')}</th><th title="${t('st.playedT')}">${t('st.played')}</th><th title="${t('st.wonT')}">${t('st.won')}</th><th title="${t('st.lostT')}">${t('st.lost')}</th><th title="${t('st.diffT')}">+/−</th><th>${t('st.pts')}</th></tr></thead>
       <tbody>${body}</tbody>
     </table></div>
   </div>`;
@@ -431,8 +487,8 @@ function knockoutView(e) {
     .map((stage) => {
       const ms = e.matches.filter((m) => m.stage === stage || (stage === 'final' && m.stage === 'third'));
       if (!ms.length) return '';
-      return `<div class="ko-col"><div class="ko-title">${stage === 'final' ? 'Finals' : STAGE[stage]}</div>
-        <div class="ko-matches">${ms.map((m) => koCard(m)).join('')}</div></div>`;
+      return `<div class="ko-col"><div class="ko-title">${stage === 'final' ? t('stage.finals') : stageName(stage)}</div>
+        <div class="ko-matches">${ms.map(koCard).join('')}</div></div>`;
     })
     .join('');
   return `<div class="ko-scroll" data-scroll-id="ko"><div class="ko-board">${cols}</div></div>`;
@@ -444,8 +500,9 @@ function koCard(m) {
     const champ = m.stage === 'final' && m.winner === s;
     return `<div class="ko-row ${cls}">${m[s] ? avatar(teamName(m[s]), 'sm') : ''}<span class="truncate">${esc(slotName(m, s))}</span>${champ ? CROWN : m.winner === s ? icon('check') : ''}</div>`;
   };
+  const label = m.stage === 'third' ? stageName('third') : m.stage === 'final' ? t('championship') : shortLabel(m);
   return `<div class="ko-card st-${m.status} ${m.stage}" data-mid="${m.id}">
-    <div class="ko-head"><span>${m.stage === 'third' ? '3rd place' : m.stage === 'final' ? 'Championship' : shortLabel(m)} · T${m.table}</span>${statusTag(m)}</div>
+    <div class="ko-head"><span>${label} · T${m.table}</span>${statusTag(m)}</div>
     ${row('a')}${row('b')}
   </div>`;
 }
@@ -465,7 +522,7 @@ function leaders(e) {
     if (!margin || diff > margin.diff) margin = { m, diff };
   }
   const list = [...stats.values()];
-  if (!list.length) return emptyState('No results yet', 'Leaders show up here once the first matches finish.', 9);
+  if (!list.length) return emptyState(t('leaders.emptyTitle'), t('leaders.emptyBody'), 9);
   const top = (key, fmtValue, asc = false) =>
     list
       .filter((x) => x[key] !== null && x[key] > 0)
@@ -473,14 +530,14 @@ function leaders(e) {
       .slice(0, 3)
       .map((x, i) => `<li><span class="rank r${i + 1}">${i + 1}</span>${avatar(teamName(x.id), 'sm')}<span class="truncate">${esc(teamName(x.id))}</span><b>${fmtValue(x[key])}</b></li>`)
       .join('') || '<li class="muted">—</li>';
+  const card = (ic, title, body) => `<div class="card leader"><div class="leader-head">${icon(ic)}<h3>${title}</h3></div>${body}</div>`;
   return `<div class="leaders">
-    <div class="card leader"><div class="leader-head">${icon('trophy')}<h3>Most wins</h3></div><ol>${top('wins', (v) => v)}</ol></div>
-    <div class="card leader"><div class="leader-head">${icon('target')}<h3>Balls cleared</h3></div><ol>${top('cleared', (v) => v)}</ol></div>
-    <div class="card leader"><div class="leader-head">${icon('zap')}<h3>Fastest win</h3></div><ol>${top('fastest', fmt, true)}</ol></div>
-    <div class="card leader"><div class="leader-head">${icon('flag')}<h3>Biggest margin</h3></div>
-      ${margin && margin.diff > 0
-        ? `<div class="margin"><b>${esc(teamName(margin.m[margin.m.winner]))}</b><span class="muted small">beat ${esc(teamName(margin.m[other(margin.m.winner)]))} by ${plural(margin.diff, 'ball')}</span></div>`
-        : '<p class="muted small">Track balls to see this.</p>'}</div>
+    ${card('trophy', t('leaders.wins'), `<ol>${top('wins', (v) => v)}</ol>`)}
+    ${card('target', t('leaders.cleared'), `<ol>${top('cleared', (v) => v)}</ol>`)}
+    ${card('zap', t('leaders.fastest'), `<ol>${top('fastest', fmt, true)}</ol>`)}
+    ${card('flag', t('leaders.margin'), margin && margin.diff > 0
+      ? `<div class="margin"><b>${esc(teamName(margin.m[margin.m.winner]))}</b><span class="muted small">${t('leaders.beat', { loser: esc(teamName(margin.m[other(margin.m.winner)])), balls: plural(margin.diff, 'ball') })}</span></div>`
+      : `<p class="muted small">${t('leaders.trackBalls')}</p>`)}
   </div>`;
 }
 
@@ -494,12 +551,12 @@ function championBanner(e) {
     <div class="champion-glow"></div>
     <div class="champion-avatar"><span class="crown-float">${CROWN}</span>${avatar(teamName(id), 'xl')}</div>
     <div class="champion-copy">
-      <span class="eyebrow gold">Champions</span>
+      <span class="eyebrow gold">${t('champions')}</span>
       <h2>${esc(teamName(id))}</h2>
       <p class="muted">${esc(memberLine(id))}</p>
       <div class="podium-line">
-        ${runnerUp ? `<span>${pill('2nd', 'muted xs')} ${esc(teamName(runnerUp))}</span>` : ''}
-        ${third ? `<span>${pill('3rd', 'muted xs')} ${esc(teamName(third[third.winner]))}</span>` : ''}
+        ${runnerUp ? `<span>${pill(t('place.2'), 'muted xs')} ${esc(teamName(runnerUp))}</span>` : ''}
+        ${third ? `<span>${pill(t('place.3'), 'muted xs')} ${esc(teamName(third[third.winner]))}</span>` : ''}
       </div>
     </div>
     <div class="champion-ball">${ball(8, 84, false, 'float')}</div>
@@ -510,13 +567,13 @@ function historySection() {
   const h = S.state.history;
   if (!h.length) return '';
   return `<section class="section anim">
-    <div class="section-head"><h2>Hall of fame</h2><span class="muted small">${plural(h.length, 'past tournament')}</span></div>
+    <div class="section-head"><h2>${t('hall.title')}</h2><span class="muted small">${plural(h.length, 'pastTournament')}</span></div>
     <div class="hall">${h
       .map((x) => `<div class="hall-item">
         ${CROWN}
         <div class="min0"><div class="b truncate">${esc(x.podium[0]?.name ?? '—')}</div>
           <div class="muted xs truncate">${esc(x.podium[0]?.members.join(' & ') ?? '')}</div></div>
-        <div class="hall-meta"><span class="truncate">${esc(x.name)}</span><span>${x.completedAt ? new Date(x.completedAt).toLocaleDateString() : ''}</span></div>
+        <div class="hall-meta"><span class="truncate">${esc(x.name)}</span><span>${x.completedAt ? new Date(x.completedAt).toLocaleDateString(locale()) : ''}</span></div>
       </div>`)
       .join('')}</div>
   </section>`;
@@ -526,17 +583,17 @@ function historySection() {
 function setupHome(e) {
   const teams = S.state.teams;
   const format = e.preview
-    ? `${plural(teams.length, 'team')} · ${e.rounds} rounds on ${e.tables} tables · about ${Math.round((e.rounds * e.clockMinutes) / 6) / 10} hours`
-    : `${plural(teams.length, 'team')} so far · at least 4 to play`;
+    ? t('setup.format', { teams: plural(teams.length, 'team'), rounds: e.rounds, tables: e.tables, hours: (Math.round((e.rounds * e.clockMinutes) / 6) / 10).toLocaleString(locale()) })
+    : t('setup.formatFew', { teams: plural(teams.length, 'team') });
   return `
   <section class="hero anim">
     <div class="hero-copy">
-      <span class="eyebrow">Getting ready</span>
-      <h1>${esc(e.name)}<br><span class="grad">Racking up soon.</span></h1>
-      <p class="lead">${format}. Two groups play a round robin, then the top teams go through to the knockout.</p>
+      <span class="eyebrow">${t('setup.eyebrow')}</span>
+      <h1>${esc(e.name)}<br><span class="grad">${t('setup.soon')}</span></h1>
+      <p class="lead">${format}. ${t('setup.lead')}</p>
       <div class="hero-actions">
-        <a class="btn primary" href="#/schedule">${icon('grid')} See the schedule</a>
-        <a class="btn ghost" href="#/rules">${icon('book')} House rules</a>
+        <a class="btn primary" href="#/schedule">${icon('grid')} ${t('setup.seeSchedule')}</a>
+        <a class="btn ghost" href="#/rules">${icon('book')} ${t('setup.houseRules')}</a>
       </div>
     </div>
     <div class="hero-rack" aria-hidden="true">${[[1], [9, 2], [10, 8, 3], [11, 4, 12, 5], [6, 13, 7, 14, 15]]
@@ -544,16 +601,16 @@ function setupHome(e) {
       .join('')}</div>
   </section>
   <section class="section anim">
-    <div class="section-head"><h2>Teams</h2>${isAdmin() ? `<a class="btn ghost sm" href="#/admin">${icon('gear')} Manage teams</a>` : ''}</div>
+    <div class="section-head"><h2>${t('teams')}</h2>${isAdmin() ? `<a class="btn ghost sm" href="#/admin">${icon('gear')} ${t('setup.manageTeams')}</a>` : ''}</div>
     ${teams.length
       ? `<div class="team-grid">${teams
-          .map((t, i) => {
-            const g = e.preview ? (e.groups[0].includes(t.id) ? 0 : 1) : null;
-            return `<div class="team-card" style="--i:${i}">${avatar(t.name, 'lg')}<div class="min0"><div class="b truncate">${esc(t.name)}</div>
-              <div class="muted small truncate">${esc(memberLine(t.id))}</div></div>${g !== null ? `<span class="pill ${g ? 'blue' : 'green'} xs">G${g + 1}</span>` : ''}</div>`;
+          .map((tm) => {
+            const g = e.preview ? (e.groups[0].includes(tm.id) ? 0 : 1) : null;
+            return `<div class="team-card">${avatar(tm.name, 'lg')}<div class="min0"><div class="b truncate">${esc(tm.name)}</div>
+              <div class="muted small truncate">${esc(memberLine(tm.id))}</div></div>${g !== null ? `<span class="pill ${g ? 'blue' : 'green'} xs">G${g + 1}</span>` : ''}</div>`;
           })
           .join('')}</div>`
-      : emptyState('No teams yet', 'The admin adds the teams.', 9)}
+      : emptyState(t('teams.emptyTitle'), t('teams.emptyPublic'), 9)}
   </section>
   ${historySection()}`;
 }
@@ -565,42 +622,40 @@ function setupHome(e) {
 function scheduleView() {
   const e = E();
   if (!e.matches.length) {
-    return `<div class="page-head anim"><div><span class="eyebrow">Schedule</span><h1>The night ahead</h1></div></div>
-      ${emptyState('Not enough teams yet', 'The schedule appears once there are at least 4 teams.', 3)}`;
+    return `<div class="page-head anim"><div><span class="eyebrow">${t('nav.schedule')}</span><h1>${t('sched.ahead')}</h1></div></div>
+      ${emptyState(t('sched.emptyTitle'), t('sched.emptyBody'), 3)}`;
   }
   const cur = e.status === 'live' ? currentRound(e) : null;
   const tables = Array.from({ length: e.tables }, (_, i) => i + 1);
-  const groupOfTable = (t) => matchAt(1, t)?.group;
-  const head = `<div class="sh corner">Round</div>${tables
-    .map((t) => {
-      const g = groupOfTable(t);
-      return `<div class="sh g${g ?? 'x'}"><b>Table ${t}</b><small>${g === undefined ? 'Knockout' : GROUP_NAMES[g]}</small></div>`;
+  const groupOfTable = (tb) => matchAt(1, tb)?.group;
+  const head = `<div class="sh corner">${t('sched.round')}</div>${tables
+    .map((tb) => {
+      const g = groupOfTable(tb);
+      return `<div class="sh g${g ?? 'x'}"><b>${t('table', { n: tb })}</b><small>${g === undefined ? t('stage.knockout') : groupName(g)}</small></div>`;
     })
-    .join('')}<div class="sh rest"><b>Resting</b><small>Bye</small></div>`;
+    .join('')}<div class="sh rest"><b>${t('sched.resting')}</b><small>${t('sched.bye')}</small></div>`;
 
   const rows = [];
   for (let r = 1; r <= e.rounds; r++) {
-    if (r === e.groupRounds + 1) rows.push(`<div class="sched-divider"><span>${icon('trophy')} Knockout</span></div>`);
+    if (r === e.groupRounds + 1) rows.push(`<div class="sched-divider"><span>${icon('trophy')} ${t('stage.knockout')}</span></div>`);
     const at = e.startedAt ? ` · ${clockTime(e.startedAt + (r - 1) * e.clockMinutes * 60000)}` : ` · +${(r - 1) * e.clockMinutes} min`;
     const isCur = r === cur;
-    rows.push(`<div class="sr-label ${isCur ? 'now' : ''}" style="--row:${r}"><b>R${r}</b><small>${roundStage(e, r)}${at}</small>${isCur ? '<span class="now-tag">Now</span>' : ''}</div>`);
-    for (const t of tables) {
-      const m = matchAt(r, t);
-      rows.push(m ? schedCell(e, m, isCur) : `<div class="cell open ${isCur ? 'now' : ''}" style="--row:${r}"><span>Open play</span></div>`);
+    rows.push(`<div class="sr-label ${isCur ? 'now' : ''}" style="--row:${r}"><b>${t('sched.r', { n: r })}</b><small>${roundStage(e, r)}${at}</small>${isCur ? `<span class="now-tag">${t('sched.now')}</span>` : ''}</div>`);
+    for (const tb of tables) {
+      const m = matchAt(r, tb);
+      rows.push(m ? schedCell(e, m, isCur) : `<div class="cell open ${isCur ? 'now' : ''}" style="--row:${r}"><span>${t('openPlay')}</span></div>`);
     }
     const resting = restingIn(e, r);
-    rows.push(`<div class="cell rest ${isCur ? 'now' : ''}" style="--row:${r}">${resting.length
-      ? resting.map((x) => x.ids.map((id) => `<span class="rest-chip g${x.g}">${esc(teamName(id))}</span>`).join('')).join('')
-      : `<span class="muted xs">${r > e.groupRounds ? '—' : 'Nobody'}</span>`}</div>`);
+    rows.push(`<div class="cell rest ${isCur ? 'now' : ''}" style="--row:${r}">${resting.length ? restingChips(resting) : `<span class="muted xs">${r > e.groupRounds ? '—' : t('sched.nobody')}</span>`}</div>`);
   }
 
   return `
   <div class="page-head anim">
-    <div><span class="eyebrow">${e.preview ? 'Preview' : 'Schedule'}</span><h1>${esc(e.name)}</h1>
-      <div class="meta-row"><span>${icon('clock')} ${e.rounds} rounds × ${e.clockMinutes} min</span><span>${icon('grid')} ${e.tables} tables</span><span>${icon('users')} ${plural(e.groups.flat().length, 'team')}</span></div></div>
-    <div class="legend"><span class="lg g0">Group 1</span><span class="lg g1">Group 2</span><span class="lg ko">Knockout</span><span class="lg live">Live</span></div>
+    <div><span class="eyebrow">${e.preview ? t('sched.preview') : t('nav.schedule')}</span><h1>${esc(e.name)}</h1>
+      <div class="meta-row"><span>${icon('clock')} ${t('sched.meta', { rounds: e.rounds, min: e.clockMinutes })}</span><span>${icon('grid')} ${plural(e.tables, 'table')}</span><span>${icon('users')} ${plural(e.groups.flat().length, 'team')}</span></div></div>
+    <div class="legend"><span class="lg g0">${groupName(0)}</span><span class="lg g1">${groupName(1)}</span><span class="lg ko">${t('stage.knockout')}</span><span class="lg live">${t('status.live')}</span></div>
   </div>
-  ${e.preview ? `<p class="notice anim">${icon('alert')} This is a preview from the current team list. Groups and order are locked when the admin starts the tournament.</p>` : ''}
+  ${e.preview ? `<p class="notice anim">${icon('alert')} ${t('sched.previewNote')}</p>` : ''}
   <div class="sched-scroll anim" data-scroll-id="sched">
     <div class="sched" style="--tables:${e.tables}">${head}${rows.join('')}</div>
   </div>`;
@@ -610,60 +665,135 @@ function schedCell(e, m, isCur) {
   const row = (s) => {
     const cls = m.winner === s ? 'win' : m.winner ? 'lose' : !m[s] ? 'tbd' : '';
     const left = ballsLeft(m, s);
-    const score = m.winner === s ? icon('check') : m.status !== 'ready' && left !== null && m.status !== 'waiting' ? `<small>${left}</small>` : '';
+    const score = m.winner === s ? icon('check') : m.status !== 'ready' && m.status !== 'waiting' && left !== null ? `<small>${left}</small>` : '';
     return `<div class="c-team ${cls}"><span class="truncate">${esc(slotName(m, s))}</span>${score}</div>`;
   };
   const tone = m.stage === 'group' ? `g${m.group}` : 'ko';
   const clickable = isAdmin() && !e.preview;
-  return `<${clickable ? 'button type="button"' : 'div'} class="cell match ${tone} st-${m.status} ${isCur ? 'now' : ''} ${S.fx.finished.has(m.id) ? 'just-won' : ''}" style="--row:${m.round}" data-mid="${m.id}" ${clickable ? `data-action="goto-round" data-round="${m.round}" title="Open in the control room"` : ''}>
-    ${m.stage === 'group' ? '' : `<span class="c-stage">${m.stage === 'final' ? `${CROWN} Championship` : m.stage === 'third' ? '3rd place' : shortLabel(m)}</span>`}
-    ${row('a')}<span class="c-vs">vs</span>${row('b')}
+  const stage = m.stage === 'group' ? '' : `<span class="c-stage">${m.stage === 'final' ? `${CROWN} ${t('championship')}` : m.stage === 'third' ? stageName('third') : shortLabel(m)}</span>`;
+  return `<${clickable ? 'button type="button"' : 'div'} class="cell match ${tone} st-${m.status} ${isCur ? 'now' : ''} ${S.fx.finished.has(m.id) ? 'just-won' : ''}" style="--row:${m.round}" data-mid="${m.id}" ${clickable ? `data-action="goto-round" data-round="${m.round}" title="${t('sched.openInControl')}"` : ''}>
+    ${stage}
+    ${row('a')}<span class="c-vs">${t('vs')}</span>${row('b')}
     <div class="c-foot">${statusTag(m)}</div>
   </${clickable ? 'button' : 'div'}>`;
 }
 
 /* =====================================================================
-   Rules
+   Rules: basics, and the full rulebook with a glossary
    ===================================================================== */
 
-function rulesView() {
+function rulesView(sub) {
+  const tab = sub === 'full' ? 'full' : 'basics';
+  const tabLink = (id, href, ic, label) => `<a class="tab ${tab === id ? 'on' : ''}" href="${href}" role="tab" aria-selected="${tab === id}">${icon(ic)}<span>${label}</span></a>`;
+  return `
+  <div class="admin-head anim">
+    <div><span class="eyebrow">${t('rules.eyebrow')}</span><h1>${t('rules.title')}</h1>
+      <p class="lead">${tab === 'full' ? t('rules.leadFull') : t('rules.lead')}</p></div>
+    <div class="tabs" role="tablist">
+      ${tabLink('basics', '#/rules', 'target', t('rules.tabBasics'))}
+      ${tabLink('full', '#/rules/full', 'book', t('rules.tabFull'))}
+    </div>
+  </div>
+  ${tab === 'full' ? rulebookView() : basicsView()}`;
+}
+
+function basicsView() {
   const e = E();
   const clock = e.clockMinutes || 15;
-  const rule = (ic, title, body) => `<div class="rule anim"><span class="rule-ic">${icon(ic)}</span><div><h3>${title}</h3><p>${body}</p></div></div>`;
+  const rule = (ic, key, vars = {}) => `<div class="rule anim"><span class="rule-ic">${icon(ic)}</span><div><h3>${t(`rules.${key}.t`, vars)}</h3><p>${t(`rules.${key}.b`, vars)}</p></div></div>`;
   return `
-  <div class="page-head anim"><div><span class="eyebrow">House rules</span><h1>8-Ball rules</h1>
-    <p class="lead">Everything you need for the night: how to play, how the clock works and how the tournament is decided.</p></div></div>
-
   <section class="rules-section">
-    <h2 class="anim">On the table</h2>
+    <h2 class="anim">${t('rules.onTable')}</h2>
     <div class="rules">
-      ${rule('target', 'Open table after the break', 'The table stays <b>open</b> after the break until a player legally pockets a ball. That claims stripes or solids for the team.')}
-      ${rule('hand', 'Only the 8 is called', 'No need to call your other shots: any of your balls that drops on a legal shot counts, banks and combinations included. Before shooting the 8, <b>name the pocket</b> it is going in.')}
-      ${rule('check', 'A legal shot', 'The cue ball must hit <b>your own suit first</b>. After that, any ball must hit a cushion or drop into a pocket. Anything else is a foul.')}
-      ${rule('alert', 'Fouls give ball-in-hand', 'Scratching, hitting the wrong ball first or failing to hit a rail are fouls. The opponent gets the cue ball <b>in hand anywhere</b> on the table.')}
-      ${rule('zap', 'Losing on the 8', 'Any of these is an <b>instant loss</b>: sinking the 8-ball before your suit is cleared, scratching while shooting the 8, or sinking it into an uncalled pocket.')}
+      ${rule('target', 'open')}
+      ${rule('hand', 'call8')}
+      ${rule('check', 'legal')}
+      ${rule('alert', 'fouls')}
+      ${rule('zap', 'lose8')}
     </div>
   </section>
 
   <section class="rules-section">
-    <h2 class="anim">The tournament</h2>
+    <h2 class="anim">${t('rules.tournament')}</h2>
     <div class="format anim">
-      <div class="fmt-step g0"><span class="fmt-k">Rounds 1–5</span><b>Group stage</b><p>10 teams in two groups of five. Each team plays 4 matches and rests once.</p>
+      <div class="fmt-step g0"><span class="fmt-k">${t('rules.fmt.r1')}</span><b>${stageName('group')}</b><p>${t('rules.fmt.group')}</p>
         <div class="fmt-balls">${[1, 2, 3, 4, 5].map((n) => ball(n, 18)).join('')}</div></div>
       <span class="fmt-arrow">${icon('arrowRight')}</span>
-      <div class="fmt-step ko"><span class="fmt-k">Round 6</span><b>Quarterfinals</b><p>The top 4 of each group cross over: 1st G1 vs 4th G2, and so on.</p></div>
+      <div class="fmt-step ko"><span class="fmt-k">${roundTitle(6)}</span><b>${stageName('qf')}</b><p>${t('rules.fmt.qf')}</p></div>
       <span class="fmt-arrow">${icon('arrowRight')}</span>
-      <div class="fmt-step ko"><span class="fmt-k">Round 7</span><b>Semifinals</b><p>Four teams left, on tables 1 and 2.</p></div>
+      <div class="fmt-step ko"><span class="fmt-k">${roundTitle(7)}</span><b>${stageName('sf')}</b><p>${t('rules.fmt.sf')}</p></div>
       <span class="fmt-arrow">${icon('arrowRight')}</span>
-      <div class="fmt-step gold"><span class="fmt-k">Round 8</span><b>Final</b><p>Championship on table 1 and a 3rd-place match on table 2.</p>${CROWN}</div>
+      <div class="fmt-step gold"><span class="fmt-k">${roundTitle(8)}</span><b>${stageName('final')}</b><p>${t('rules.fmt.final')}</p>${CROWN}</div>
     </div>
     <div class="rules">
-      ${rule('clock', `${clock}-minute cap`, `Every match has a strict ${clock}-minute clock. When time runs out, the team with the <b>fewest balls remaining</b> wins. If balls are tied, the current shooter gets <b>one sudden-death shot</b> at the 8-ball to decide it.`)}
-      ${rule('trophy', 'Standings', 'A win is worth <b>1 point</b>. A two-way tie is broken by the <b>head-to-head</b> result. A tie between three or more teams is broken by <b>ball differential</b> across all group matches.')}
-      ${rule('flag', 'Ball differential', 'For each group match: the balls of your suit you cleared (plus the 8 when you win with it) minus your opponent’s. The admin taps every pocketed ball, so it is counted live.')}
-      ${rule('grid', 'The schedule', `${e.rounds || 8} rounds of ${clock} minutes on ${e.tables || 4} tables, about two hours in all. <a href="#/schedule" class="link">See the full grid →</a>`)}
+      ${rule('clock', 'clock', { min: clock })}
+      ${rule('trophy', 'standings')}
+      ${rule('flag', 'diff')}
+      ${rule('grid', 'schedule', { rounds: e.rounds || 8, min: clock, tables: e.tables || 4 })}
     </div>
+    <a class="btn ghost mt anim" href="#/rules/full">${icon('book')} ${t('rules.toFull')}</a>
   </section>`;
+}
+
+function rulebookView() {
+  const lang = S.lang;
+  const sections = RULEBOOK.map((s) => ({ id: s.id, icon: s.icon, ...s[lang] }));
+  const terms = GLOSSARY.map((g) => ({ term: g[lang][0], def: g[lang][1], alt: g[lang === 'nl' ? 'en' : 'nl'][0] })).sort((a, b) => a.term.localeCompare(b.term, locale()));
+  const byLetter = new Map();
+  for (const x of terms) {
+    const letter = x.term[0].toUpperCase();
+    if (!byLetter.has(letter)) byLetter.set(letter, []);
+    byLetter.get(letter).push(x);
+  }
+  const item = (text) => {
+    const house = text.startsWith('!');
+    return `<li class="${house ? 'house' : ''}">${house ? `<span class="house-tag">${t('rules.houseTag')}</span>` : ''}${house ? text.slice(1) : text}</li>`;
+  };
+  const toc = `${sections.map((s, i) => `<button class="toc-link" data-action="jump" data-target="sec-${s.id}"><span class="toc-n">${i + 1}</span>${s.title}</button>`).join('')}
+    <button class="toc-link gloss" data-action="jump" data-target="glossary">${icon('book')}${t('gloss.title')}</button>`;
+  return `
+  <div class="rulebook">
+    <aside class="rb-toc anim"><div class="toc-head">${t('rules.contents')}</div>${toc}
+      <p class="toc-legend"><span class="house-tag">${t('rules.houseTag')}</span> ${t('rules.houseLegend')}</p></aside>
+    <div class="rb-body">
+      ${sections
+        .map((s, i) => `<section class="rb-sec anim" id="sec-${s.id}">
+          <h2><span class="rb-ic">${icon(s.icon)}</span><span class="rb-n">${i + 1}.</span> ${s.title}</h2>
+          <ul class="rb-list">${s.items.map(item).join('')}</ul>
+        </section>`)
+        .join('')}
+      <section class="rb-sec glossary anim" id="glossary">
+        <div class="gl-head">
+          <h2><span class="rb-ic">${icon('book')}</span>${t('gloss.title')}</h2>
+          <label class="gl-search">${icon('search')}<input id="gloss-q" type="search" data-filter="glossary" placeholder="${t('gloss.search', { n: terms.length })}" value="${esc(S.glossQuery)}" autocomplete="off"></label>
+        </div>
+        <p class="muted small gl-hint">${t('gloss.hint')}</p>
+        <div class="gl-letters">${[...byLetter.keys()].map((l) => `<button class="gl-letter" data-action="jump" data-target="gl-${l}">${l}</button>`).join('')}</div>
+        ${[...byLetter.entries()]
+          .map(([l, list]) => `<div class="gl-group" id="gl-${l}"><div class="gl-l">${l}</div><dl>${list
+            .map((x) => `<div class="gl-item" data-text="${esc(`${x.term} ${x.alt} ${x.def}`.toLowerCase().replace(/<[^>]+>/g, ''))}"><dt>${x.term}${x.alt && x.alt !== x.term ? ` <span class="gl-alt">${x.alt}</span>` : ''}</dt><dd>${x.def}</dd></div>`)
+            .join('')}</dl></div>`)
+          .join('')}
+        <p class="gl-none muted" hidden>${t('gloss.none')}</p>
+      </section>
+    </div>
+  </div>`;
+}
+
+/** Hides glossary entries that don't match the search, without re-rendering. */
+function filterGlossary() {
+  const q = S.glossQuery.trim().toLowerCase();
+  const items = $app.querySelectorAll('.gl-item');
+  if (!items.length) return;
+  let shown = 0;
+  items.forEach((el) => {
+    const hit = !q || el.dataset.text.includes(q);
+    el.hidden = !hit;
+    if (hit) shown += 1;
+  });
+  $app.querySelectorAll('.gl-group').forEach((g) => (g.hidden = !g.querySelector('.gl-item:not([hidden])')));
+  $app.querySelector('.gl-letters')?.toggleAttribute('hidden', Boolean(q));
+  $app.querySelector('.gl-none')?.toggleAttribute('hidden', shown > 0);
 }
 
 /* =====================================================================
@@ -674,11 +804,11 @@ function adminView() {
   if (!isAdmin()) {
     return `<div class="center-wrap"><div class="card auth-card narrow anim">
       <div class="auth-icon">${icon('shield')}</div>
-      <h2>Admin sign in</h2>
-      <p class="muted">Manage teams and run the tables.</p>
+      <h2>${t('admin.signInTitle')}</h2>
+      <p class="muted">${t('admin.signInBody')}</p>
       <form data-form="admin-login" class="stack">
-        <label class="field"><span>Admin password</span><input id="admin-pass" name="password" type="password" required autocomplete="current-password"></label>
-        <button class="btn primary block" type="submit">Sign in</button>
+        <label class="field"><span>${t('admin.password')}</span><input id="admin-pass" name="password" type="password" required autocomplete="current-password"></label>
+        <button class="btn primary block" type="submit">${t('admin.signIn')}</button>
       </form>
     </div></div>`;
   }
@@ -690,11 +820,11 @@ function adminView() {
   const body = { tables: tablesPanel, teams: teamsPanel, event: eventPanel }[tab](e);
   return `
   <div class="admin-head anim">
-    <div><span class="eyebrow">Control room</span><h1>${esc(e.name)}</h1></div>
+    <div><span class="eyebrow">${t('admin.eyebrow')}</span><h1>${esc(e.name)}</h1></div>
     <div class="tabs" role="tablist">
-      ${tabBtn('tables', 'Tables', 'grid', liveCount ? `<span class="tab-badge">${liveCount}</span>` : '')}
-      ${tabBtn('teams', 'Teams', 'users', `<span class="tab-count">${S.state.teams.length}</span>`)}
-      ${tabBtn('event', 'Tournament', 'gear')}
+      ${tabBtn('tables', t('admin.tabTables'), 'grid', liveCount ? `<span class="tab-badge">${liveCount}</span>` : '')}
+      ${tabBtn('teams', t('teams'), 'users', `<span class="tab-count">${S.state.teams.length}</span>`)}
+      ${tabBtn('event', t('admin.tabEvent'), 'gear')}
     </div>
   </div>
   ${body}`;
@@ -705,48 +835,48 @@ function adminView() {
 function teamsPanel(e) {
   const teams = S.state.teams;
   const setup = e.status === 'setup';
-  const groups = e.groups.length ? e.groups : [teams.map((t) => t.id)];
+  const groups = e.groups.length ? e.groups : [teams.map((tm) => tm.id)];
   const block = (ids, g) => {
-    const list = ids.map((id) => teams.find((t) => t.id === id)).filter(Boolean);
+    const list = ids.map((id) => teams.find((tm) => tm.id === id)).filter(Boolean);
     return `<div class="team-block">
-      ${e.groups.length ? `<div class="tb-head g${g}"><span>${GROUP_NAMES[g]}</span><span class="muted xs">${plural(list.length, 'team')}</span></div>` : ''}
-      ${list.map((t) => teamRow(t, teams.indexOf(t), teams.length, setup)).join('')}
+      ${e.groups.length ? `<div class="tb-head g${g}"><span>${groupName(g)}</span><span class="muted xs">${plural(list.length, 'team')}</span></div>` : ''}
+      ${list.map((tm) => teamRow(tm, teams.indexOf(tm), teams.length, setup)).join('')}
     </div>`;
   };
   return `
   <div class="panel-bar anim">
     <div class="pb-copy">${setup
-      ? `<b>${plural(teams.length, 'team')}</b><span class="muted small">${e.preview ? `Group 1 gets the first ${e.groups[0].length}, Group 2 the rest. Reorder or shuffle to change the groups.` : 'Add at least 4 teams to build the schedule.'}</span>`
-      : `<b>Teams are locked</b><span class="muted small">The tournament is on. You can still rename teams and players, or disable a player.</span>`}</div>
+      ? `<b>${plural(teams.length, 'team')}</b><span class="muted small">${e.preview ? t('teams.groupsHint', { n: e.groups[0].length }) : t('teams.needFour')}</span>`
+      : `<b>${t('teams.locked')}</b><span class="muted small">${t('teams.lockedHint')}</span>`}</div>
     ${setup ? `<div class="btn-row">
-      <button class="btn ghost" data-action="team-shuffle" ${teams.length < 2 ? 'disabled' : ''}>${icon('shuffle')} Shuffle</button>
-      <button class="btn primary" data-action="team-add">${icon('plus')} Add team</button>
+      <button class="btn ghost" data-action="team-shuffle" ${teams.length < 2 ? 'disabled' : ''}>${icon('shuffle')} ${t('teams.shuffle')}</button>
+      <button class="btn primary" data-action="team-add">${icon('plus')} ${t('teams.add')}</button>
     </div>` : ''}
   </div>
-  ${teams.length ? `<div class="team-list anim">${groups.map(block).join('')}</div>` : emptyState('No teams yet', 'Add a team for each pair of players. Names can be changed any time.', 9, `<button class="btn primary" data-action="team-add">${icon('plus')} Add the first team</button>`)}
-  ${setup && teams.length ? `<button class="add-row anim" data-action="team-add">${icon('plus')} Add another team</button>` : ''}`;
+  ${teams.length ? `<div class="team-list anim">${groups.map(block).join('')}</div>` : emptyState(t('teams.emptyTitle'), t('teams.emptyAdmin'), 9, `<button class="btn primary" data-action="team-add">${icon('plus')} ${t('teams.addFirst')}</button>`)}
+  ${setup && teams.length ? `<button class="add-row anim" data-action="team-add">${icon('plus')} ${t('teams.addAnother')}</button>` : ''}`;
 }
 
-function teamRow(t, i, total, setup) {
-  const members = t.members
+function teamRow(tm, i, total, setup) {
+  const members = tm.members
     .map(
       (m, k) => `<div class="member ${m.active ? '' : 'off'}">
-        <input class="inline-input" id="mn-${t.id}-${k}" data-edit="member-name" data-id="${t.id}" data-index="${k}" value="${esc(m.name)}" maxlength="24" aria-label="Player ${k + 1} name" autocomplete="off">
-        <label class="mini-switch" title="${m.active ? 'Playing · tap to disable' : 'Disabled · tap to enable'}">
-          <input type="checkbox" data-edit="member-active" data-id="${t.id}" data-index="${k}" ${m.active ? 'checked' : ''} aria-label="${esc(m.name)} is playing"><span class="track"></span>
+        <input class="inline-input" id="mn-${tm.id}-${k}" data-edit="member-name" data-id="${tm.id}" data-index="${k}" value="${esc(m.name)}" maxlength="24" aria-label="${t('teams.playerN', { n: k + 1 })}" autocomplete="off">
+        <label class="mini-switch" title="${m.active ? t('teams.playing') : t('teams.disabled')}">
+          <input type="checkbox" data-edit="member-active" data-id="${tm.id}" data-index="${k}" ${m.active ? 'checked' : ''} aria-label="${t('teams.isPlaying', { name: esc(m.name) })}"><span class="track"></span>
         </label>
       </div>`,
     )
     .join('');
-  return `<div class="team-row" data-flip="team-${t.id}">
+  return `<div class="team-row" data-flip="team-${tm.id}">
     <span class="seed">${i + 1}</span>
-    ${avatar(t.name)}
-    <input class="inline-input team-name" id="tn-${t.id}" data-edit="team-name" data-id="${t.id}" value="${esc(t.name)}" maxlength="24" aria-label="Team name" autocomplete="off">
+    ${avatar(tm.name)}
+    <input class="inline-input team-name" id="tn-${tm.id}" data-edit="team-name" data-id="${tm.id}" value="${esc(tm.name)}" maxlength="24" aria-label="${t('teams.teamName')}" autocomplete="off">
     <div class="members">${members}</div>
     ${setup ? `<div class="row-actions">
-      <button class="icon-btn" data-action="team-move" data-id="${t.id}" data-by="-1" ${i === 0 ? 'disabled' : ''} title="Move up" aria-label="Move up">${icon('arrowUp')}</button>
-      <button class="icon-btn" data-action="team-move" data-id="${t.id}" data-by="1" ${i === total - 1 ? 'disabled' : ''} title="Move down" aria-label="Move down">${icon('arrowDown')}</button>
-      <button class="icon-btn danger" data-action="team-del" data-id="${t.id}" title="Remove team" aria-label="Remove team">${icon('trash')}</button>
+      <button class="icon-btn" data-action="team-move" data-id="${tm.id}" data-by="-1" ${i === 0 ? 'disabled' : ''} title="${t('teams.up')}" aria-label="${t('teams.up')}">${icon('arrowUp')}</button>
+      <button class="icon-btn" data-action="team-move" data-id="${tm.id}" data-by="1" ${i === total - 1 ? 'disabled' : ''} title="${t('teams.down')}" aria-label="${t('teams.down')}">${icon('arrowDown')}</button>
+      <button class="icon-btn danger" data-action="team-del" data-id="${tm.id}" title="${t('teams.remove')}" aria-label="${t('teams.remove')}">${icon('trash')}</button>
     </div>` : ''}
   </div>`;
 }
@@ -756,37 +886,37 @@ function teamRow(t, i, total, setup) {
 function eventPanel(e) {
   const setup = e.status === 'setup';
   const teams = S.state.teams.length;
-  const ko = e.preview || !setup ? (e.advance === 4 ? 'quarterfinals, semifinals, final' : 'semifinals, final') : '';
-  const summary = e.preview || !setup
+  const known = e.preview || !setup;
+  const summary = known
     ? `<ol class="fmt-list">
-        <li><b>${plural(e.groups.flat().length, 'team')}</b> → Group 1 (${e.groups[0].length}) and Group 2 (${e.groups[1].length})</li>
-        <li><b>${e.groupRounds} group rounds</b> → every team plays everyone in its group once</li>
-        <li><b>Knockout</b> → top ${e.advance} of each group: ${ko}${e.thirdPlace ? ', plus a 3rd-place match' : ''}</li>
-        <li><b>${e.rounds} rounds on ${e.tables} tables</b> → about ${e.rounds * e.clockMinutes} minutes</li>
+        <li>${t('ev.fmtGroups', { teams: plural(e.groups.flat().length, 'team'), a: e.groups[0].length, b: e.groups[1].length })}</li>
+        <li>${t('ev.fmtRounds', { n: e.groupRounds })}</li>
+        <li>${t('ev.fmtKo', { n: e.advance, stages: t(e.advance === 4 ? 'ev.koQf' : 'ev.koSf'), third: e.thirdPlace ? t('ev.plusThird') : '' })}</li>
+        <li>${t('ev.fmtTotal', { rounds: e.rounds, tables: e.tables, min: e.rounds * e.clockMinutes })}</li>
       </ol>`
-    : `<p class="muted">Add at least 4 teams to see the format.</p>`;
+    : `<p class="muted">${t('ev.needFour')}</p>`;
   return `
   <div class="admin-grid anim">
     <div class="card">
-      <div class="card-head"><h3>Settings</h3></div>
+      <div class="card-head"><h3>${t('ev.settings')}</h3></div>
       <form data-form="event" class="stack">
-        <label class="field"><span>Tournament name</span><input id="ev-name" name="name" required maxlength="60" value="${esc(e.name)}"></label>
-        <label class="field"><span>Match clock (minutes, 0 = none)</span><input id="ev-clock" name="clockMinutes" type="number" min="0" max="180" step="0.5" value="${e.clockMinutes}"></label>
+        <label class="field"><span>${t('ev.name')}</span><input id="ev-name" name="name" required maxlength="60" value="${esc(e.name)}"></label>
+        <label class="field"><span>${t('ev.clock')}</span><input id="ev-clock" name="clockMinutes" type="number" min="0" max="180" step="0.5" value="${e.clockMinutes}"></label>
         <label class="switch ${setup ? '' : 'disabled'}">
           <input id="ev-third" name="thirdPlace" type="checkbox" ${e.thirdPlace ? 'checked' : ''} ${setup ? '' : 'disabled'}>
           <span class="track"></span>
-          <span><b>3rd-place match</b><br><span class="muted small">Played on table 2 next to the final.${setup ? '' : ' Locked once started.'}</span></span>
+          <span><b>${t('ev.third')}</b><br><span class="muted small">${t('ev.thirdHint')}${setup ? '' : ` ${t('ev.thirdLocked')}`}</span></span>
         </label>
-        <button class="btn primary" type="submit">${icon('check')} Save</button>
+        <button class="btn primary" type="submit">${icon('check')} ${t('save')}</button>
       </form>
     </div>
     <div class="card">
-      <div class="card-head"><h3>Format</h3>${e.status === 'live' ? livePill('Running') : e.status === 'done' ? pill('Finished', 'gold') : pill('Setup', 'blue')}</div>
+      <div class="card-head"><h3>${t('ev.format')}</h3>${e.status === 'live' ? livePill(t('ev.running')) : e.status === 'done' ? pill(t('ev.finished'), 'gold') : pill(t('ev.setup'), 'blue')}</div>
       ${summary}
       <div class="btn-row mt">
         ${setup
-          ? `<button class="btn primary big" data-action="event-start" ${teams < 4 ? 'disabled' : ''}>${icon('play')} Start tournament</button>`
-          : `<button class="btn ghost danger-text" data-action="event-reset">${icon('rotate')} ${e.status === 'done' ? 'New tournament' : 'Reset tournament'}</button>`}
+          ? `<button class="btn primary big" data-action="event-start" ${teams < 4 ? 'disabled' : ''}>${icon('play')} ${t('ev.start')}</button>`
+          : `<button class="btn ghost danger-text" data-action="event-reset">${icon('rotate')} ${e.status === 'done' ? t('ev.new') : t('ev.reset')}</button>`}
       </div>
     </div>
   </div>`;
@@ -800,21 +930,21 @@ function selectedRound(e) {
 
 function tablesPanel(e) {
   if (e.status === 'setup') {
-    return emptyState('The tournament has not started', 'Add teams, then start it to get the tables going.', 3, `<button class="btn primary" data-action="tab" data-tab="event">${icon('play')} Go to start</button>`);
+    return emptyState(t('tables.notStartedTitle'), t('tables.notStartedBody'), 3, `<button class="btn primary" data-action="tab" data-tab="event">${icon('play')} ${t('tables.goStart')}</button>`);
   }
   const r = selectedRound(e);
   const cur = currentRound(e);
   const cards = [];
-  for (let t = 1; t <= e.tables; t++) {
-    const m = matchAt(r, t);
-    cards.push(m ? tableCard(e, m) : `<div class="tcard open"><span class="tc-num">${t}</span><span class="muted">Open play</span></div>`);
+  for (let tb = 1; tb <= e.tables; tb++) {
+    const m = matchAt(r, tb);
+    cards.push(m ? tableCard(m) : `<div class="tcard open"><span class="tc-num">${tb}</span><span class="muted">${t('openPlay')}</span></div>`);
   }
   const resting = restingIn(e, r);
   return `
   ${e.status === 'done' ? championBanner(e) : ''}
   ${roundBar(e, r, cur)}
   <div class="tcards">${cards.join('')}</div>
-  ${resting.length ? `<p class="resting-line">${icon('pause')} Resting this round: ${resting.map((x) => x.ids.map((id) => `<span class="rest-chip g${x.g}">${esc(teamName(id))}</span>`).join('')).join('')}</p>` : ''}`;
+  ${resting.length ? `<p class="resting-line">${icon('pause')} ${t('tables.restingRound')}: ${restingChips(resting)}</p>` : ''}`;
 }
 
 function roundBar(e, r, cur) {
@@ -829,30 +959,34 @@ function roundBar(e, r, cur) {
   const idle = playable.filter((m) => !m.live);
   const anyStarted = idle.some((m) => m.startedAt);
   const longest = live.reduce((max, m) => (m.timer.durationMs && timeLeft(m) > (max ? timeLeft(max) : -1) ? m : max), null);
+  const startLabel = !idle.length ? t('tables.allRunning') : t(anyStarted ? 'tables.resume' : 'tables.start', { what: t(idle.length > 1 || !live.length ? 'tables.allTables' : 'tables.oneTable') });
+  const status = playable.length
+    ? t('tables.liveOf', { live: live.length, total: plural(playable.length, 'table') })
+    : e.matches.filter((m) => m.round === r).every((m) => m.winner) ? t('tables.roundDone') : t('tables.waitingEarlier');
   return `<div class="roundbar anim">
     <div class="rb-top">
-      <div class="rb-title"><span class="eyebrow">${roundStage(e, r)}</span><h2>${roundTitle(e, r)} <span class="muted">of ${e.rounds}</span></h2></div>
-      <div class="rchips" aria-label="Rounds">${chips.join('')}</div>
+      <div class="rb-title"><span class="eyebrow">${roundStage(e, r)}</span><h2>${roundTitle(r)} <span class="muted">${t('tables.of', { n: e.rounds })}</span></h2></div>
+      <div class="rchips" aria-label="${t('rounds')}">${chips.join('')}</div>
     </div>
     <div class="rb-bottom">
       <div class="rb-status">
         ${longest ? `<span class="clock md" data-timer="${longest.id}">${fmt(timeLeft(longest))}</span>` : ''}
-        <span class="muted small">${playable.length ? `${live.length} of ${plural(playable.length, 'table')} live` : e.matches.filter((m) => m.round === r).every((m) => m.winner) ? 'Round complete' : 'Waiting for earlier results'}</span>
-        ${r !== cur ? `<button class="btn ghost sm" data-action="pick-round" data-round="">${icon('arrowRight')} Back to round ${cur}</button>` : ''}
+        <span class="muted small">${status}</span>
+        ${r !== cur ? `<button class="btn ghost sm" data-action="pick-round" data-round="">${icon('arrowRight')} ${t('tables.backTo', { n: cur })}</button>` : ''}
       </div>
       <div class="btn-row">
-        <button class="btn primary" data-action="round" data-type="start" data-round="${r}" ${idle.length ? '' : 'disabled'}>${icon('play')} ${!idle.length ? 'All running' : `${anyStarted ? 'Resume' : 'Start'} ${idle.length > 1 || !live.length ? 'all tables' : 'table'}`}</button>
-        <button class="btn ghost" data-action="round" data-type="pause" data-round="${r}" ${live.length ? '' : 'disabled'}>${icon('pause')} Pause all</button>
-        <button class="btn ghost" data-action="round" data-type="add" data-round="${r}" ${playable.length ? '' : 'disabled'}>${icon('plus')} 1 min all</button>
+        <button class="btn primary" data-action="round" data-type="start" data-round="${r}" ${idle.length ? '' : 'disabled'}>${icon('play')} ${startLabel}</button>
+        <button class="btn ghost" data-action="round" data-type="pause" data-round="${r}" ${live.length ? '' : 'disabled'}>${icon('pause')} ${t('tables.pauseAll')}</button>
+        <button class="btn ghost" data-action="round" data-type="add" data-round="${r}" ${playable.length ? '' : 'disabled'}>${icon('plus')} ${t('tables.addAll')}</button>
       </div>
     </div>
   </div>`;
 }
 
-function tableCard(e, m) {
+function tableCard(m) {
   const head = `<header class="tc-head">
     <span class="tc-num">${m.table}</span>
-    <div class="tc-title"><b>Table ${m.table}</b><small>${m.stage === 'group' ? GROUP_NAMES[m.group] : STAGE[m.stage]}</small></div>
+    <div class="tc-title"><b>${t('table', { n: m.table })}</b><small>${m.stage === 'group' ? groupName(m.group) : stageName(m.stage)}</small></div>
     ${m.status === 'live' && m.timer.durationMs ? livePill() : statusTag(m, '')}
     ${m.timer.durationMs ? `<span class="clock sm tc-clock" data-timer="${m.id}">${fmt(timeLeft(m))}</span>` : ''}
   </header>`;
@@ -860,8 +994,8 @@ function tableCard(e, m) {
 
   if (m.status === 'waiting') {
     return `<article class="tcard st-waiting" data-mid="${m.id}">${head}
-      <div class="tc-wait"><span>${esc(slotName(m, 'a'))}</span><span class="c-vs">vs</span><span>${esc(slotName(m, 'b'))}</span></div>
-      <p class="muted small center-text">Unlocks when the earlier results are in.</p></article>`;
+      <div class="tc-wait"><span>${esc(slotName(m, 'a'))}</span><span class="c-vs">${t('vs')}</span><span>${esc(slotName(m, 'b'))}</span></div>
+      <p class="muted small center-text">${t('tables.unlocks')}</p></article>`;
   }
 
   const teamRowHtml = (s) => {
@@ -872,48 +1006,48 @@ function tableCard(e, m) {
       ${avatar(teamName(m[s]))}
       <div class="min0"><div class="tc-name truncate">${esc(teamName(m[s]))}</div><div class="muted xs truncate">${esc(memberLine(m[s]))}</div></div>
       ${g ? groupChip(g) : ''}
-      <div class="tc-left">${m.winner === s ? `<span class="tc-trophy">${icon('trophy')}</span>` : left === null ? '<b>–</b>' : `<b>${left}</b>`}<small>${m.winner === s ? 'winner' : 'left'}</small></div>
+      <div class="tc-left">${m.winner === s ? `<span class="tc-trophy">${icon('trophy')}</span>` : left === null ? '<b>–</b>' : `<b>${left}</b>`}<small>${m.winner === s ? t('winner') : t('left')}</small></div>
     </div>`;
   };
 
   if (m.status === 'done') {
     return `<article class="tcard st-done ${fx}" data-mid="${m.id}">${head}
       ${teamRowHtml('a')}${teamRowHtml('b')}
-      <div class="tc-actions"><span class="muted small">${m.result === 'timeout' ? 'Decided on time' : 'Match over'} · ${m.potted.length} balls down</span>
-        <button class="btn ghost sm" data-action="m" data-type="undo" data-id="${m.id}">${icon('undo')} Undo</button></div>
+      <div class="tc-actions"><span class="muted small">${t(m.result === 'timeout' ? 'tables.decidedTime' : 'tables.over')} · ${t('tables.ballsDown', { n: m.potted.length })}</span>
+        <button class="btn ghost sm" data-action="m" data-type="undo" data-id="${m.id}">${icon('undo')} ${t('undo')}</button></div>
     </article>`;
   }
 
-  const A = teamName(m.a);
-  const rackGroup = (balls, g) => `<div class="tc-set">${balls.map((n) => `<button class="ball-btn ${m.potted.includes(n) ? 'in' : ''}" data-action="m" data-type="ball" data-id="${m.id}" data-ball="${n}" aria-pressed="${m.potted.includes(n)}" title="Ball ${n}">${matchBall(m, n, 30)}</button>`).join('')}${g ? `<span class="set-owner">${esc(teamName(m[g]))}</span>` : ''}</div>`;
+  const A = esc(teamName(m.a));
+  const rackGroup = (balls, g) => `<div class="tc-set">${balls.map((n) => `<button class="ball-btn ${m.potted.includes(n) ? 'in' : ''}" data-action="m" data-type="ball" data-id="${m.id}" data-ball="${n}" aria-pressed="${m.potted.includes(n)}" title="${t('ball.n', { n })}">${matchBall(m, n, 30)}</button>`).join('')}${g ? `<span class="set-owner">${esc(teamName(m[g]))}</span>` : ''}</div>`;
   const ownerOf = (group) => (m.groupA ? (m.groupA === group ? 'a' : 'b') : null);
   const live = m.status === 'live';
   return `<article class="tcard st-${m.status} ${fx}" data-mid="${m.id}">${head}
     ${teamRowHtml('a')}${teamRowHtml('b')}
     <div class="tc-groups">
-      <button class="seg-btn ${m.groupA === 'solids' ? 'on' : ''}" data-action="m" data-type="groups" data-id="${m.id}" data-group="solids">${ball(1, 16)}<span class="truncate">${esc(A)}: Solids</span></button>
-      <button class="seg-btn ${m.groupA ? '' : 'on'}" data-action="m" data-type="groups" data-id="${m.id}" data-group="">Open</button>
-      <button class="seg-btn ${m.groupA === 'stripes' ? 'on' : ''}" data-action="m" data-type="groups" data-id="${m.id}" data-group="stripes">${ball(9, 16)}<span class="truncate">${esc(A)}: Stripes</span></button>
+      <button class="seg-btn ${m.groupA === 'solids' ? 'on' : ''}" data-action="m" data-type="groups" data-id="${m.id}" data-group="solids">${ball(1, 16)}<span class="truncate">${A}: ${suitName('solids')}</span></button>
+      <button class="seg-btn ${m.groupA ? '' : 'on'}" data-action="m" data-type="groups" data-id="${m.id}" data-group="">${t('tables.open')}</button>
+      <button class="seg-btn ${m.groupA === 'stripes' ? 'on' : ''}" data-action="m" data-type="groups" data-id="${m.id}" data-group="stripes">${ball(9, 16)}<span class="truncate">${A}: ${suitName('stripes')}</span></button>
     </div>
     <div class="tc-rack felt">
       ${rackGroup(SOLIDS, ownerOf('solids'))}
-      <button class="ball-btn eight-btn ${m.potted.includes(8) ? 'in' : ''}" data-action="m" data-type="ball" data-id="${m.id}" data-ball="8" aria-pressed="${m.potted.includes(8)}" title="8-ball">${matchBall(m, 8, 40)}</button>
+      <button class="ball-btn eight-btn ${m.potted.includes(8) ? 'in' : ''}" data-action="m" data-type="ball" data-id="${m.id}" data-ball="8" aria-pressed="${m.potted.includes(8)}" title="${t('ball.eight')}">${matchBall(m, 8, 40)}</button>
       ${rackGroup(STRIPES, ownerOf('stripes'))}
     </div>
     <div class="tc-actions">
       <div class="btn-row">
         ${live
-          ? `<button class="btn ghost sm" data-action="m" data-type="pause" data-id="${m.id}">${icon('pause')} Pause</button>`
-          : `<button class="btn primary sm" data-action="m" data-type="start" data-id="${m.id}">${icon('play')} ${m.startedAt ? 'Resume' : 'Start'}</button>`}
-        <button class="btn ghost sm" data-action="m" data-type="add" data-id="${m.id}" title="Add a minute">${icon('plus')} 1</button>
-        <button class="icon-btn" data-action="m-more" data-id="${m.id}" title="More" aria-label="More options">${icon('gear')}</button>
+          ? `<button class="btn ghost sm" data-action="m" data-type="pause" data-id="${m.id}">${icon('pause')} ${t('pause')}</button>`
+          : `<button class="btn primary sm" data-action="m" data-type="start" data-id="${m.id}">${icon('play')} ${t(m.startedAt ? 'resume' : 'start')}</button>`}
+        <button class="btn ghost sm" data-action="m" data-type="add" data-id="${m.id}" title="${t('tables.addMinute')}">${icon('plus')} 1</button>
+        <button class="icon-btn" data-action="m-more" data-id="${m.id}" title="${t('tables.more')}" aria-label="${t('tables.more')}">${icon('gear')}</button>
       </div>
       <div class="btn-row winners">
-        <button class="btn win sm" data-action="m-winner" data-id="${m.id}" data-slot="a">${icon('trophy')}<span class="truncate">${esc(A)}</span></button>
+        <button class="btn win sm" data-action="m-winner" data-id="${m.id}" data-slot="a">${icon('trophy')}<span class="truncate">${A}</span></button>
         <button class="btn win sm" data-action="m-winner" data-id="${m.id}" data-slot="b">${icon('trophy')}<span class="truncate">${esc(teamName(m.b))}</span></button>
       </div>
     </div>
-    <p class="tc-warn">${icon('clock')} Time's up. Fewest balls left wins.</p>
+    <p class="tc-warn">${icon('clock')} ${t('tables.timeUpWarn')}</p>
   </article>`;
 }
 
@@ -948,7 +1082,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && S.modal) S.modal.onDismiss?.();
 });
 
-function confirmDialog({ title, body, confirmLabel = 'Confirm', danger = false }) {
+function confirmDialog({ title, body, confirmLabel = t('confirm'), danger = false }) {
   return new Promise((resolve) => {
     const done = (ok) => {
       closeModal();
@@ -957,7 +1091,7 @@ function confirmDialog({ title, body, confirmLabel = 'Confirm', danger = false }
     openModal(
       `<h2>${esc(title)}</h2><p class="muted">${esc(body)}</p>
        <div class="modal-actions">
-         <button class="btn ghost" data-choice="no">Cancel</button>
+         <button class="btn ghost" data-choice="no">${t('cancel')}</button>
          <button class="btn ${danger ? 'danger' : 'primary'}" data-choice="yes">${esc(confirmLabel)}</button>
        </div>`,
       { onChoice: (c) => done(c === 'yes'), onDismiss: () => done(false) },
@@ -974,7 +1108,7 @@ function pickTeamDialog(m, { title, body, extras = [], kind = 'dialog', iconName
     };
     const choice = (s) => {
       const left = ballsLeft(m, s);
-      return `<button class="choice" data-choice="${s}">${avatar(teamName(m[s]), 'lg')}<span>${esc(teamName(m[s]))}</span>${left !== null ? `<small class="muted">${plural(left, 'ball')} left</small>` : ''}</button>`;
+      return `<button class="choice" data-choice="${s}">${avatar(teamName(m[s]), 'lg')}<span>${esc(teamName(m[s]))}</span>${left !== null ? `<small class="muted">${t('modal.ballsLeft', { balls: plural(left, 'ball') })}</small>` : ''}</button>`;
     };
     openModal(
       `<div class="modal-icon ${kind}">${icon(iconName)}</div>
@@ -990,10 +1124,10 @@ function pickTeamDialog(m, { title, body, extras = [], kind = 'dialog', iconName
 function ballVerdict(m) {
   const a = ballsLeft(m, 'a');
   const b = ballsLeft(m, 'b');
-  if (a === null) return 'The table is still open, so balls are level: the current shooter gets one sudden-death shot at the 8.';
-  if (a === b) return `Balls are tied at ${a} each: the current shooter gets one sudden-death shot at the 8.`;
+  if (a === null) return t('timeup.open');
+  if (a === b) return t('timeup.tied', { n: a });
   const lead = a < b ? 'a' : 'b';
-  return `<b>${esc(teamName(m[lead]))}</b> has fewer balls left (${Math.min(a, b)} vs ${Math.max(a, b)}).`;
+  return t('timeup.lead', { team: esc(teamName(m[lead])), min: Math.min(a, b), max: Math.max(a, b) });
 }
 
 /** Admin only: pops up wherever they are when a running match clock hits zero. */
@@ -1011,11 +1145,11 @@ function checkTimeouts() {
 async function showTimeUp(m) {
   beep();
   const c = await pickTeamDialog(m, {
-    title: `Time's up on table ${m.table}`,
+    title: t('timeup.title', { n: m.table }),
     body: ballVerdict(m),
     kind: 'timeup',
     iconName: 'clock',
-    extras: [['later', 'Decide later'], ['extend', `${icon('plus')} 2 more minutes`]],
+    extras: [['later', t('timeup.later')], ['extend', `${icon('plus')} ${t('timeup.extend')}`]],
   });
   if (c === 'a' || c === 'b') await run(() => act(m.id, { type: 'winner', slot: c, reason: 'timeout' }));
   if (c === 'extend') await run(() => act(m.id, { type: 'timer', op: 'add', minutes: 2 }));
@@ -1030,16 +1164,16 @@ function syncModal() {
 
 function moreDialog(m) {
   openModal(
-    `<h2>Table ${m.table}</h2><p class="muted">${esc(teamName(m.a))} vs ${esc(teamName(m.b))}</p>
+    `<h2>${t('table', { n: m.table })}</h2><p class="muted">${esc(teamName(m.a))} ${t('vs')} ${esc(teamName(m.b))}</p>
      <form class="inline-form" data-modal-form>
-       <label class="field grow"><span>Match clock (minutes)</span><input name="minutes" type="number" min="0" max="180" step="0.5" value="${m.timer.durationMs / 60000}"></label>
-       <button class="btn ghost" type="submit">Set clock</button>
+       <label class="field grow"><span>${t('more.clock')}</span><input name="minutes" type="number" min="0" max="180" step="0.5" value="${m.timer.durationMs / 60000}"></label>
+       <button class="btn ghost" type="submit">${t('more.setClock')}</button>
      </form>
      <div class="modal-list">
-       <button class="btn ghost block" data-choice="reset">${icon('rotate')} Reset clock to full time</button>
-       <button class="btn ghost block danger-text" data-choice="restart">${icon('undo')} Restart match (clears balls and groups)</button>
+       <button class="btn ghost block" data-choice="reset">${icon('rotate')} ${t('more.resetClock')}</button>
+       <button class="btn ghost block danger-text" data-choice="restart">${icon('undo')} ${t('more.restart')}</button>
      </div>
-     <div class="modal-actions"><button class="btn ghost" data-choice="close">Close</button></div>`,
+     <div class="modal-actions"><button class="btn ghost" data-choice="close">${t('close')}</button></div>`,
     {
       mid: m.id,
       onDismiss: closeModal,
@@ -1051,7 +1185,7 @@ function moreDialog(m) {
         closeModal();
         if (c === 'reset') return run(() => act(m.id, { type: 'timer', op: 'reset' }));
         if (c === 'restart') {
-          const ok = await confirmDialog({ title: 'Restart this match?', body: 'Pocketed balls and groups are cleared and the clock goes back to full time.', confirmLabel: 'Restart', danger: true });
+          const ok = await confirmDialog({ title: t('more.restartTitle'), body: t('more.restartBody'), confirmLabel: t('more.restartOk'), danger: true });
           if (ok) run(() => act(m.id, { type: 'restart' }));
         }
       },
@@ -1106,8 +1240,8 @@ function playCounters(entering) {
     S.counts.set(key, to);
     if (from === to || REDUCED_MOTION) continue;
     const start = performance.now();
-    const step = (t) => {
-      const k = Math.min(1, (t - start) / 700);
+    const step = (time) => {
+      const k = Math.min(1, (time - start) / 700);
       el.textContent = Math.round(from + (to - from) * (1 - (1 - k) ** 3));
       if (k < 1 && el.isConnected) requestAnimationFrame(step);
     };
@@ -1149,15 +1283,15 @@ function playCelebrations(fx) {
    ===================================================================== */
 
 function route() {
-  const name = location.hash.replace(/^#\/?/, '').split(/[/?]/)[0];
-  return { name: ['schedule', 'rules', 'admin'].includes(name) ? name : 'home' };
+  const [name, sub] = location.hash.replace(/^#\/?/, '').split(/[?]/)[0].split('/');
+  return { name: ['schedule', 'rules', 'admin'].includes(name) ? name : 'home', sub };
 }
 
 function view(r) {
-  if (!S.state) return '<div class="loading">' + ball(8, 48) + '<span>Racking up…</span></div>';
+  if (!S.state) return `<div class="loading">${ball(8, 48)}<span>${t('loading')}</span></div>`;
   if (r.name === 'admin') return adminView();
   if (r.name === 'schedule') return scheduleView();
-  if (r.name === 'rules') return rulesView();
+  if (r.name === 'rules') return rulesView(r.sub);
   return homeView();
 }
 
@@ -1209,10 +1343,12 @@ function render() {
   const entering = S.renderedKey !== location.hash;
   const snapshot = entering ? null : captureUi();
   const flip = entering ? null : captureFlip();
+  document.documentElement.lang = S.lang;
   $nav.innerHTML = navView(r);
   $app.innerHTML = view(r);
   if (snapshot) restoreUi(snapshot);
   S.renderedKey = S.state ? location.hash : null; // the loading screen doesn't count as having entered
+  filterGlossary();
 
   if (entering && !REDUCED_MOTION) {
     $app.querySelectorAll('.anim').forEach((el, i) => {
@@ -1267,10 +1403,14 @@ document.addEventListener('click', (e) => {
 async function onAction(action, d) {
   const e = S.state?.event;
   switch (action) {
+    case 'lang':
+      S.lang = d.lang;
+      writeStored('pm_lang', d.lang);
+      return render();
     case 'logout':
       await api('POST', '/api/logout').catch(() => {});
       setSession(null, { role: null });
-      return toast('Signed out');
+      return toast(t('toast.signedOut'));
     case 'tab':
       S.adminTab = d.tab;
       writeStored('pm_tab', d.tab);
@@ -1284,6 +1424,10 @@ async function onAction(action, d) {
       S.adminTab = 'tables';
       location.hash = '#/admin';
       return;
+    case 'jump': {
+      const target = document.getElementById(d.target);
+      return target?.scrollIntoView({ behavior: REDUCED_MOTION ? 'auto' : 'smooth', block: 'start' });
+    }
 
     // Teams
     case 'team-add': {
@@ -1292,38 +1436,34 @@ async function onAction(action, d) {
       return;
     }
     case 'team-del': {
-      const ok = await confirmDialog({ title: `Remove ${teamName(d.id)}?`, body: 'The team and both player names are deleted.', confirmLabel: 'Remove', danger: true });
+      const ok = await confirmDialog({ title: t('teams.removeTitle', { name: teamName(d.id) }), body: t('teams.removeBody'), confirmLabel: t('teams.removeOk'), danger: true });
       if (ok) await api('DELETE', `/api/teams/${d.id}`);
       return;
     }
     case 'team-move':
       return api('POST', `/api/teams/${d.id}/move`, { by: Number(d.by) });
     case 'team-shuffle': {
-      const ok = await confirmDialog({ title: 'Shuffle the teams?', body: 'The order is randomised, which also redraws the groups.', confirmLabel: 'Shuffle' });
+      const ok = await confirmDialog({ title: t('teams.shuffleTitle'), body: t('teams.shuffleBody'), confirmLabel: t('teams.shuffle') });
       if (ok) await api('POST', '/api/teams/shuffle');
       return;
     }
 
     // Tournament
     case 'event-start': {
-      const ok = await confirmDialog({
-        title: 'Start the tournament?',
-        body: `${plural(S.state.teams.length, 'team')} are locked into their groups and the schedule is fixed. You can still rename teams and players.`,
-        confirmLabel: 'Start tournament',
-      });
+      const ok = await confirmDialog({ title: t('ev.startTitle'), body: t('ev.startBody', { teams: plural(S.state.teams.length, 'team') }), confirmLabel: t('ev.start') });
       if (!ok) return;
       await api('POST', '/api/event/start');
       S.adminTab = 'tables';
       S.adminRound = null;
       writeStored('pm_tab', 'tables');
-      return toast('Game on! Round 1 is ready.', 'success');
+      return toast(t('toast.started'), 'success');
     }
     case 'event-reset': {
       const done = e.status === 'done';
       const ok = await confirmDialog({
-        title: done ? 'Start a new tournament?' : 'Reset the tournament?',
-        body: done ? 'The results go into the hall of fame and the teams stay, ready for another night.' : 'Every result is wiped and you go back to setup. Teams are kept.',
-        confirmLabel: done ? 'New tournament' : 'Wipe results',
+        title: t(done ? 'ev.newTitle' : 'ev.resetTitle'),
+        body: t(done ? 'ev.newBody' : 'ev.resetBody'),
+        confirmLabel: t(done ? 'ev.new' : 'ev.resetOk'),
         danger: !done,
       });
       if (!ok) return;
@@ -1342,7 +1482,7 @@ async function onAction(action, d) {
       if (d.type === 'groups') body.groupA = d.group || null;
       if (d.type === 'add') Object.assign(body, { type: 'timer', op: 'add', minutes: 1 });
       if (d.type === 'undo') {
-        const ok = await confirmDialog({ title: 'Undo this result?', body: 'The match goes back to live with its balls kept.', confirmLabel: 'Undo result' });
+        const ok = await confirmDialog({ title: t('undoTitle'), body: t('undoBody'), confirmLabel: t('undoOk') });
         if (!ok) return;
       }
       const m = findMatch(d.id);
@@ -1356,9 +1496,9 @@ async function onAction(action, d) {
     case 'm-winner': {
       const m = findMatch(d.id);
       const ok = await confirmDialog({
-        title: `${teamName(m[d.slot])} wins?`,
-        body: m.stage === 'group' ? 'The result goes into the group standings. You can undo it until the knockout starts.' : 'They go through. You can undo this until their next match starts.',
-        confirmLabel: 'Confirm winner',
+        title: t('winnerTitle', { team: teamName(m[d.slot]) }),
+        body: t(m.stage === 'group' ? 'winnerBodyGroup' : 'winnerBodyKo'),
+        confirmLabel: t('winnerOk'),
       });
       if (!ok) return;
       return act(d.id, { type: 'winner', slot: d.slot, reason: isExpired(m) ? 'timeout' : 'win' });
@@ -1371,11 +1511,11 @@ async function eightDown(mid) {
   const m = findMatch(mid);
   if (!m || m.winner) return;
   const c = await pickTeamDialog(m, {
-    title: `8-ball down on table ${m.table}`,
-    body: 'Legal 8 on a cleared suit wins. An early 8, a scratch on the 8 or a wrong pocket loses. Who takes it?',
+    title: t('eight.title', { n: m.table }),
+    body: t('eight.body'),
     kind: 'eight',
     iconName: 'zap',
-    extras: [['undo', `${icon('undo')} Oops, put it back`], ['later', 'Not yet']],
+    extras: [['undo', `${icon('undo')} ${t('eight.putBack')}`], ['later', t('eight.notYet')]],
   });
   if (c === 'a' || c === 'b') await run(() => act(mid, { type: 'winner', slot: c, reason: isExpired(m) ? 'timeout' : 'win' }));
   if (c === 'undo') await run(() => act(mid, { type: 'ball', ball: 8 }));
@@ -1393,7 +1533,7 @@ async function onForm(name, data) {
     case 'admin-login': {
       const res = await api('POST', '/api/admin/login', { password: data.get('password') });
       setSession(res.token, res.me);
-      return toast('Admin mode on', 'success');
+      return toast(t('toast.adminOn'), 'success');
     }
     case 'event':
       await api('PATCH', '/api/event', {
@@ -1401,7 +1541,7 @@ async function onForm(name, data) {
         clockMinutes: data.get('clockMinutes'),
         thirdPlace: data.get('thirdPlace') === 'on',
       });
-      return toast('Saved', 'success');
+      return toast(t('toast.saved'), 'success');
   }
 }
 
@@ -1412,7 +1552,7 @@ function saveInline(el) {
   const value = el.value.trim();
   if (!value) {
     el.value = el.defaultValue;
-    return toast('Names cannot be empty', 'error');
+    return toast(t('toast.emptyName'), 'error');
   }
   const url = el.dataset.edit === 'team-name' ? `/api/teams/${id}` : `/api/teams/${id}/members/${index}`;
   el.defaultValue = value; // don't save twice if focus moves around
@@ -1441,7 +1581,19 @@ document.addEventListener('change', (e) => {
   }
 });
 
+document.addEventListener('input', (e) => {
+  if (e.target.dataset?.filter === 'glossary') {
+    S.glossQuery = e.target.value;
+    filterGlossary();
+  }
+});
+
 window.addEventListener('hashchange', () => {
+  const r = route();
+  if (r.name === 'rules') {
+    S.rulesTab = r.sub === 'full' ? 'full' : 'basics';
+    writeStored('pm_rules', S.rulesTab);
+  }
   render();
   window.scrollTo(0, 0);
 });
@@ -1461,7 +1613,7 @@ function applyState(state) {
   S.fx = diffState(S.state, state);
   S.state = state;
   S.offset = state.serverTime - Date.now();
-  S.teams = new Map(state.teams.map((t) => [t.id, t]));
+  S.teams = new Map(state.teams.map((tm) => [tm.id, tm]));
   S.online = true;
   render();
 }
