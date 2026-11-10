@@ -4,6 +4,7 @@ const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const zlib = require('node:zlib');
 
 const store = require('./src/store');
 const auth = require('./src/auth');
@@ -143,7 +144,7 @@ function route(method, pattern, handler, { quiet = false } = {}) {
 
 route('GET', '/api/me', ({ session }) => meFor(session));
 
-// Polling fallback for networks that block the live stream (e.g. Cloudflare Quick Tunnels).
+// Polling fallback for networks that block the live stream.
 route('GET', '/api/state', ({ query }) => {
   if (Number(query.get('v')) === stateVersion) return { unchanged: true };
   return publicState();
@@ -397,31 +398,58 @@ const statePayload = () => `event: state\ndata: ${JSON.stringify(publicState())}
 function broadcast() {
   if (!clients.size) return;
   const payload = statePayload();
-  for (const res of clients) res.write(payload);
+  for (const client of clients) client.send(payload);
 }
 
+/** Every phone gets the whole state on each change, so the stream is gzipped (about 11x smaller). */
 function handleEvents(req, res) {
+  const gzip = acceptsGzip(req);
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
     Connection: 'keep-alive',
     'X-Accel-Buffering': 'no',
+    ...(gzip ? { 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding' } : {}),
   });
-  res.write('retry: 2000\n\n');
-  res.write(statePayload());
-  clients.add(res);
-  req.on('close', () => clients.delete(res));
+  let client = { send: (text) => res.write(text) };
+  if (gzip) {
+    const stream = zlib.createGzip();
+    stream.pipe(res);
+    client = {
+      send: (text) => {
+        stream.write(text);
+        stream.flush(); // push each event out now instead of waiting for a full block
+      },
+      close: () => stream.end(),
+    };
+  }
+  client.send('retry: 2000\n\n');
+  client.send(statePayload());
+  clients.add(client);
+  req.on('close', () => {
+    clients.delete(client);
+    client.close?.();
+  });
 }
 
 setInterval(() => {
-  for (const res of clients) res.write(': ping\n\n');
+  for (const client of clients) client.send(': ping\n\n');
 }, 25000).unref();
 
 // ---------------------------------------------------------------- http plumbing
 
+const acceptsGzip = (req) => /\bgzip\b/.test(req.headers['accept-encoding'] || '');
+
+/** Sends a body, gzipped when the client takes it and it is worth it. */
+function sendBody(res, status, headers, body) {
+  const gzip = body.length > 1024 && acceptsGzip(res.req);
+  const out = gzip ? zlib.gzipSync(body) : body;
+  res.writeHead(status, { ...headers, Vary: 'Accept-Encoding', ...(gzip ? { 'Content-Encoding': 'gzip' } : {}), 'Content-Length': out.length });
+  res.end(res.req.method === 'HEAD' ? undefined : out);
+}
+
 function sendJson(res, status, data) {
-  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
-  res.end(JSON.stringify(data));
+  sendBody(res, status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }, Buffer.from(JSON.stringify(data)));
 }
 
 function readJson(req) {
@@ -448,6 +476,17 @@ function readJson(req) {
   });
 }
 
+/**
+ * Behind the tunnel every visitor arrives from this PC, so the lockout would lock everyone out at once.
+ * Only then do we use the address the tunnel adds: its last X-Forwarded-For entry, which a visitor can't forge.
+ */
+function clientIp(req) {
+  const remote = req.socket.remoteAddress || '';
+  const forwarded = req.headers['x-forwarded-for'];
+  const viaTunnel = /^(::1|127\.|::ffff:127\.)/.test(remote) && forwarded;
+  return viaTunnel ? String(forwarded).split(',').pop().trim() : remote;
+}
+
 async function handleApi(req, res, url) {
   for (const r of routes) {
     if (r.method !== req.method) continue;
@@ -463,7 +502,7 @@ async function handleApi(req, res, url) {
       query: url.searchParams,
       token,
       session: sessionFor(token),
-      ip: req.socket.remoteAddress,
+      ip: clientIp(req),
     });
 
     if (req.method !== 'GET') {
@@ -521,8 +560,17 @@ function serveStatic(res, pathname) {
       if (path.extname(rel)) return sendJson(res, 404, { error: 'Not found.' });
       file = path.join(PUBLIC_DIR, 'index.html');
     }
-    res.writeHead(200, { ...SECURITY_HEADERS, 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-cache' });
-    fs.createReadStream(file).pipe(res);
+    fs.stat(file, (statErr, fileStat) => {
+      if (statErr) return sendJson(res, 404, { error: 'Not found.' });
+      // Browsers revalidate on every load (no-cache); an unchanged file then costs a tiny 304.
+      const etag = `"${fileStat.size.toString(36)}-${Math.floor(fileStat.mtimeMs).toString(36)}"`;
+      const headers = { ...SECURITY_HEADERS, 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-cache', ETag: etag };
+      if (res.req.headers['if-none-match'] === etag) {
+        res.writeHead(304, headers);
+        return res.end();
+      }
+      fs.readFile(file, (readErr, body) => (readErr ? sendJson(res, 404, { error: 'Not found.' }) : sendBody(res, 200, headers, body)));
+    });
   });
 }
 

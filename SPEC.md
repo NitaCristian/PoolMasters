@@ -157,13 +157,15 @@ Dark pool-hall palette (near-black, emerald felt, gold trophy accents), wood-rim
 - **Rules as context:** every request carries the Basics, the full rulebook (house rules marked) and the glossary as a system instruction, in the chat's language, because the Gemini API has no memory between calls. Rule edits therefore reach existing chats. Gemini is told to answer from these rules first, name the section, and say so when they don't cover something. The last 41 messages of the chat are sent with it.
 - **Several chats:** a sidebar lists them, newest activity first; each can be reopened or deleted. The title is the start of the first question.
 - **No empty chats:** **New chat** only opens a blank page. The chat is created on the server when the first question has been answered. If Gemini fails, nothing is saved and the question goes back in the box.
+- **When Gemini is overloaded** (Google answers 503 "high demand"), a model that hangs for 40 s counts as busy too. Then the fallback models `gemini-3.6-flash` and `gemini-3.5-flash-lite` are tried in turn, within 90 s in total. Only if they all fail does the admin see "Gemini is very busy right now".
 - Limits: 4000 characters per message, 400 messages per chat, 200 chats, 20 questions per minute.
 
 ## 6. Real-time model
 
 - **Server-Sent Events** (`GET /api/events`) push the full state to every client after each change. Everyone gets the same state.
 - Clients re-render from state and keep focus, typed text, scroll and open panels. Only the parts that changed animate.
-- **Polling fallback** when SSE is blocked (e.g. Cloudflare Quick Tunnels): `GET /api/state?v=` every 2 s while visible, and immediately after your own actions. The connection dot shows green (live), amber (polling) or red (reconnecting).
+- The stream, JSON answers and static files are **gzipped** for clients that accept it (a full state is about 12 KB raw, about 1 KB gzipped). Static files carry an ETag, so an unchanged file costs a 304.
+- **Polling fallback** when SSE is blocked by a proxy: `GET /api/state?v=` every 2 s while visible, and immediately after your own actions. The connection dot shows green (live), amber (polling) or red (reconnecting).
 
 ---
 
@@ -248,7 +250,7 @@ All `/api/ai/*` routes are admin only.
 - The key goes to Google in the `x-goog-api-key` header, never in a URL, and redirects are refused. Google's error text is never passed on.
 - Chats are not in the public state or the live stream. They are stored unencrypted in `db.json`, so don't put secrets in them.
 - Gemini's answers are escaped before formatting, and links are not rendered. A Content Security Policy blocks inline and third-party scripts.
-- There is no HTTPS by itself. Put the app behind a TLS proxy (or the Cloudflare tunnel) when it is exposed beyond the local network.
+- There is no HTTPS by itself. Put the app behind a TLS proxy (or the ngrok tunnel from `npm run live`) when it is exposed beyond the local network.
 
 ---
 

@@ -10,7 +10,11 @@ const { STRINGS, RULEBOOK, GLOSSARY } = require('../public/i18n');
 
 const API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 const DEFAULT_MODEL = 'gemini-3.8-flash';
-const TIMEOUT_MS = 60 * 1000;
+// Tried in turn when the chosen model is overloaded. Older models are busy less often.
+const FALLBACK_MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash-lite'];
+const TIMEOUT_MS = 40 * 1000; // one attempt; a model that hangs this long counts as busy
+const ASK_BUDGET_MS = 90 * 1000; // all attempts together, so the admin never waits minutes
+const BUSY = 'Gemini is very busy right now. Try again in a minute.';
 const SECRETS_FILE = path.join(DATA_DIR, 'secrets.json');
 
 // ---------------------------------------------------------------- API key at rest
@@ -110,23 +114,26 @@ const rulesInfo = () => ({ sections: RULEBOOK.length, terms: GLOSSARY.length });
 // ---------------------------------------------------------------- talking to Gemini
 
 /** Never passes Google's own error text on: we show our own message and nothing about the request. */
-async function request(url, { key, ...options }, rejected) {
+async function request(url, { key, timeoutMs = TIMEOUT_MS, ...options }, rejected) {
   let res;
+  let data;
   try {
     res = await fetch(url, {
       ...options,
       headers: { ...options.headers, 'x-goog-api-key': key ?? apiKey }, // a header, because URLs end up in logs
       redirect: 'error',
-      signal: AbortSignal.timeout(TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
     });
-  } catch {
+    data = await res.json().catch(() => ({}));
+  } catch (err) {
+    if (err.name === 'TimeoutError') fail(503, BUSY);
     fail(502, 'Could not reach Gemini. Try again.');
   }
-  const data = await res.json().catch(() => ({}));
   if (res.ok) return data;
   if (res.status === 401 || res.status === 403 || /api.key/i.test(data.error?.message ?? '')) fail(502, rejected);
   if (res.status === 429) fail(429, 'Gemini is busy or the key is out of quota. Try again in a minute.');
   if (res.status === 404) fail(502, 'Gemini does not know that model. Check the model name in the settings.');
+  if (res.status === 503 || res.status === 500) fail(503, BUSY);
   fail(502, 'Gemini could not answer. Try again.');
 }
 
@@ -135,11 +142,29 @@ function verifyKey(key) {
   return request(`${API_BASE}/models?pageSize=1`, { key }, 'Gemini rejected this API key.');
 }
 
+/** Google often answers 503 "high demand" or hangs: then the fallback models are tried in turn. */
 async function ask(model, system, messages) {
+  const attempts = [model, ...FALLBACK_MODELS.filter((m) => m !== model)];
+  const deadline = Date.now() + ASK_BUDGET_MS;
+  for (const [i, attempt] of attempts.entries()) {
+    const left = deadline - Date.now();
+    if (left < 5000) break;
+    try {
+      return await generate(attempt, system, messages, Math.min(TIMEOUT_MS, left));
+    } catch (err) {
+      if (err.status !== 503 || i === attempts.length - 1) throw err;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+  }
+  return fail(503, BUSY);
+}
+
+async function generate(model, system, messages, timeoutMs) {
   const data = await request(
     `${API_BASE}/models/${encodeURIComponent(model)}:generateContent`,
     {
       method: 'POST',
+      timeoutMs,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: system }] },

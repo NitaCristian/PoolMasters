@@ -648,6 +648,7 @@ const ERRORS_NL = {
   'Gemini is busy or the key is out of quota. Try again in a minute.': 'Gemini is druk of het tegoed van de sleutel is op. Probeer het over een minuut opnieuw.',
   'Gemini does not know that model. Check the model name in the settings.': 'Gemini kent dat model niet. Controleer de modelnaam in de instellingen.',
   'Gemini could not answer. Try again.': 'Gemini kon niet antwoorden. Probeer het opnieuw.',
+  'Gemini is very busy right now. Try again in a minute.': 'Gemini is nu erg druk. Probeer het over een minuut opnieuw.',
   'Gemini returned no answer. Try rephrasing the question.': 'Gemini gaf geen antwoord. Probeer de vraag anders te stellen.',
   'Admin only.': 'Alleen voor de beheerder.',
   'Team not found.': 'Team niet gevonden.',

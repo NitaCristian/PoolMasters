@@ -242,7 +242,8 @@ function restingIn(e, r) {
 }
 
 async function api(method, url, body) {
-  const headers = { 'Content-Type': 'application/json' };
+  // The header keeps ngrok's free-plan notice page away from these requests.
+  const headers = { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': '1' };
   if (S.token) headers.Authorization = `Bearer ${S.token}`;
   const res = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined });
   const data = await res.json().catch(() => ({}));
@@ -1852,7 +1853,7 @@ function markOffline() {
   $nav.querySelector('.conn')?.classList.remove('on');
 }
 
-/** Live updates over SSE; falls back to polling when nothing arrives (some tunnels/proxies block streams). */
+/** Live updates over SSE; falls back to polling when nothing arrives (some proxies block streams). */
 function connect() {
   if (S.polling) return refresh(true);
   S.events?.close();
