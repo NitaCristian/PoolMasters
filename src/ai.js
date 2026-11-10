@@ -73,16 +73,15 @@ const plain = (html) => html.replace(/<[^>]+>/g, '');
 /** The Basics tab of the rules page, as text. */
 function basics(lang, clock) {
   const strings = STRINGS[lang];
-  const fill = (s) => plain(s).replace(/\{\w+\}/g, (m) => (m === '{min}' ? clock : '')).trim();
-  const rules = Object.keys(strings)
-    .filter((key) => /^rules\.\w+\.t$/.test(key))
-    .map((key) => `- ${fill(strings[key])}: ${fill(strings[key.replace(/t$/, 'b')])}`);
-  const format = ['group', 'qf', 'sf', 'final'].map((key) => `- ${fill(strings[`rules.fmt.${key}`])}`);
-  return [...rules, ...format].join('\n');
+  const fill = (s) => plain(s).replace(/\{min\}/g, clock).trim();
+  return Object.keys(strings)
+    .filter((key) => /^rules\.\w+\.t$/.test(key) && key !== 'rules.schedule.t') // tonight's schedule is sent below instead
+    .map((key) => `- ${fill(strings[key])}: ${fill(strings[key.replace(/t$/, 'b')])}`)
+    .join('\n');
 }
 
 /** Sent with every request: the API keeps no memory, so this is what makes Gemini know our rules. */
-function systemPrompt(lang, clock) {
+function systemPrompt(lang, clock, tonight) {
   const book = RULEBOOK.map((section, i) => {
     const { title, items } = section[lang];
     const lines = items.map((item) => (item.startsWith('!') ? `- [HOUSE RULE] ${plain(item.slice(1))}` : `- ${plain(item)}`));
@@ -101,6 +100,9 @@ Below are the rules this tournament already uses. They are the final word:
 
 ## Quick rules
 ${basics(lang, clock)}
+
+## Tonight's tournament
+${tonight}
 
 ## Full rulebook
 ${book}

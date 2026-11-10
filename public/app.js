@@ -219,8 +219,8 @@ function roundStage(e, r) {
 const roundTitle = (r) => t('round', { n: r });
 
 function shortLabel(m) {
-  if (m.stage === 'qf') return t('short.qf', { n: m.table });
-  if (m.stage === 'sf') return t('short.sf', { n: m.table });
+  if (m.stage === 'qf') return t('short.qf', { n: m.slot ?? m.table });
+  if (m.stage === 'sf') return t('short.sf', { n: m.slot ?? m.table });
   if (m.stage === 'group') return `${groupName(m.group)} · T${m.table}`;
   return stageName(m.stage);
 }
@@ -309,12 +309,16 @@ function matchBall(m, n, size) {
 }
 
 function avatar(name, size = '') {
-  const initials = String(name)
-    .split(/\s+/)
-    .map((w) => [...w][0] ?? '')
-    .join('')
-    .slice(0, 2)
-    .toUpperCase();
+  const words = String(name).split(/\s+/);
+  // "Team 12" → "T12", not "T1", so numbered teams stay apart.
+  const number = /^\d+$/.test(words.at(-1)) && words.length > 1 ? words.at(-1) : null;
+  const initials = number
+    ? `${[...words[0]][0]}${number}`.slice(0, 3).toUpperCase()
+    : words
+        .map((w) => [...w][0] ?? '')
+        .join('')
+        .slice(0, 2)
+        .toUpperCase();
   const hue = [...String(name)].reduce((h, c) => (h * 31 + c.codePointAt(0)) % 360, 7);
   return `<span class="avatar ${size}" style="--h:${hue}" aria-hidden="true">${esc(initials)}</span>`;
 }
@@ -634,11 +638,14 @@ function scheduleView() {
   }
   const cur = e.status === 'live' ? currentRound(e) : null;
   const tables = Array.from({ length: e.tables }, (_, i) => i + 1);
-  const groupOfTable = (tb) => matchAt(1, tb)?.group;
+  // With few tables a table can host both groups, so only label a group when it has the table to itself.
+  const groupsOnTable = (tb) => new Set(e.matches.filter((m) => m.stage === 'group' && m.table === tb).map((m) => m.group));
   const head = `<div class="sh corner">${t('sched.round')}</div>${tables
     .map((tb) => {
-      const g = groupOfTable(tb);
-      return `<div class="sh g${g ?? 'x'}"><b>${t('table', { n: tb })}</b><small>${g === undefined ? t('stage.knockout') : groupName(g)}</small></div>`;
+      const gs = groupsOnTable(tb);
+      const g = gs.size === 1 ? [...gs][0] : undefined;
+      const label = gs.size === 0 ? t('stage.knockout') : g === undefined ? t('sched.bothGroups') : groupName(g);
+      return `<div class="sh g${g ?? (gs.size ? 'mix' : 'x')}"><b>${t('table', { n: tb })}</b><small>${label}</small></div>`;
     })
     .join('')}<div class="sh rest"><b>${t('sched.resting')}</b><small>${t('sched.bye')}</small></div>`;
 
@@ -722,24 +729,68 @@ function basicsView() {
 
   <section class="rules-section">
     <h2 class="anim">${t('rules.tournament')}</h2>
-    <div class="format anim">
-      <div class="fmt-step g0"><span class="fmt-k">${t('rules.fmt.r1')}</span><b>${stageName('group')}</b><p>${t('rules.fmt.group')}</p>
-        <div class="fmt-balls">${[1, 2, 3, 4, 5].map((n) => ball(n, 18)).join('')}</div></div>
-      <span class="fmt-arrow">${icon('arrowRight')}</span>
-      <div class="fmt-step ko"><span class="fmt-k">${roundTitle(6)}</span><b>${stageName('qf')}</b><p>${t('rules.fmt.qf')}</p></div>
-      <span class="fmt-arrow">${icon('arrowRight')}</span>
-      <div class="fmt-step ko"><span class="fmt-k">${roundTitle(7)}</span><b>${stageName('sf')}</b><p>${t('rules.fmt.sf')}</p></div>
-      <span class="fmt-arrow">${icon('arrowRight')}</span>
-      <div class="fmt-step gold"><span class="fmt-k">${roundTitle(8)}</span><b>${stageName('final')}</b><p>${t('rules.fmt.final')}</p>${CROWN}</div>
-    </div>
+    ${formatTimeline(e)}
     <div class="rules">
       ${rule('clock', 'clock', { min: clock })}
       ${rule('trophy', 'standings')}
       ${rule('flag', 'diff')}
-      ${rule('grid', 'schedule', { rounds: e.rounds || 8, min: clock, tables: e.tables || 4 })}
+      ${e.matches.length
+        ? rule('grid', 'schedule', { rounds: e.rounds, min: clock, tables: plural(e.tables, 'table'), hours: (Math.round((e.rounds * clock) / 6) / 10).toLocaleString(locale()) })
+        : `<div class="rule anim"><span class="rule-ic">${icon('grid')}</span><div><h3>${t('rules.schedule.t')}</h3><p>${t('rules.schedule.pending')}</p></div></div>`}
     </div>
     <a class="btn ghost mt anim" href="#/rules/full">${icon('book')} ${t('rules.toFull')}</a>
   </section>`;
+}
+
+/** The format as a vertical timeline, built from tonight's schedule (or the setup preview). */
+function formatTimeline(e) {
+  const known = e.matches.length > 0;
+  const of = (stages) => e.matches.filter((m) => stages.includes(m.stage));
+  const range = (values) => {
+    const v = [...new Set(values)].sort((x, y) => x - y);
+    return v.length > 1 ? `${v[0]}–${v.at(-1)}` : `${v[0]}`;
+  };
+  const meta = (list) => {
+    if (!list.length) return '';
+    const rounds = list.map((m) => m.round);
+    const top = Math.max(...list.map((m) => m.table));
+    const r = new Set(rounds).size > 1 ? t('rules.tl.rounds', { span: range(rounds) }) : roundTitle(rounds[0]);
+    const tb = top > 1 ? t('rules.tl.tables', { span: `1–${top}` }) : t('table', { n: 1 });
+    return `${r} · ${tb}`;
+  };
+  const resting = known && e.groups.some((ids, g) => {
+    const perRound = Math.max(...Array.from({ length: e.groupRounds }, (_, r) => of(['group']).filter((m) => m.round === r + 1 && m.group === g).length));
+    return perRound * 2 < ids.length;
+  });
+  const steps = [
+    {
+      cls: 'g0',
+      name: stageName('group'),
+      meta: meta(of(['group'])),
+      text: known
+        ? `${t('rules.tl.group', { teams: e.groups.flat().length, a: e.groups[0].length, b: e.groups[1].length })}${resting ? ` ${t('rules.tl.rest')}` : ''}`
+        : t('rules.tl.groupAny'),
+    },
+  ];
+  if (!known || e.advance === 4) steps.push({ cls: 'ko', name: stageName('qf'), meta: meta(of(['qf'])), text: t(known ? 'rules.tl.qf' : 'rules.tl.qfMaybe') });
+  steps.push({ cls: 'ko', name: stageName('sf'), meta: meta(of(['sf'])), text: t(known && e.advance === 2 ? 'rules.tl.sf2' : 'rules.tl.sf') });
+  steps.push({
+    cls: 'gold',
+    name: stageName('final'),
+    meta: meta(of(['final', 'third'])),
+    text: `${t('rules.tl.final')}${e.thirdPlace ? ` ${t('rules.tl.third')}` : ''}`,
+    crown: true,
+  });
+  return `<ol class="timeline anim">
+    ${steps.map((s) => `<li class="tl-step ${s.cls}">
+      <span class="tl-dot" aria-hidden="true"></span>
+      <div class="tl-body">
+        <div class="tl-head"><b>${s.name}</b>${s.meta ? `<span class="tl-meta">${s.meta}</span>` : ''}${s.crown ? CROWN : ''}</div>
+        <p>${s.text}</p>
+      </div>
+    </li>`).join('')}
+  </ol>
+  ${known ? '' : `<p class="muted small tl-note">${t('rules.tl.pending')}</p>`}`;
 }
 
 function rulebookView() {
@@ -910,6 +961,8 @@ function eventPanel(e) {
       <form data-form="event" class="stack">
         <label class="field"><span>${t('ev.name')}</span><input id="ev-name" name="name" required maxlength="60" value="${esc(e.name)}"></label>
         <label class="field"><span>${t('ev.clock')}</span><input id="ev-clock" name="clockMinutes" type="number" min="0" max="180" step="0.5" value="${e.clockMinutes}"></label>
+        <label class="field"><span>${t('ev.tables')}</span><input id="ev-tables" name="tableCount" type="number" min="1" max="16" step="1" value="${e.tableCount}" ${setup ? '' : 'disabled'}>
+          <small class="muted small">${t('ev.tablesHint')}${setup ? '' : ` ${t('ev.thirdLocked')}`}</small></label>
         <label class="switch ${setup ? '' : 'disabled'}">
           <input id="ev-third" name="thirdPlace" type="checkbox" ${e.thirdPlace ? 'checked' : ''} ${setup ? '' : 'disabled'}>
           <span class="track"></span>
@@ -1755,6 +1808,7 @@ async function onForm(name, data) {
       await api('PATCH', '/api/event', {
         name: data.get('name'),
         clockMinutes: data.get('clockMinutes'),
+        ...(data.has('tableCount') ? { tableCount: Number(data.get('tableCount')) } : {}), // disabled once started
         thirdPlace: data.get('thirdPlace') === 'on',
       });
       return toast(t('toast.saved'), 'success');

@@ -33,9 +33,9 @@ There is one admin password. It can be signed in on several devices at once, for
 
 ## 3. Tournament format
 
-Designed for **10 teams on 4 tables in 8 rounds of 15 minutes** (about two hours). Other team counts also work, see §3.4.
+Works for any number of teams (4–32) and any number of tables (1–16, set by the admin). The examples below are the typical night: **10 teams on 4 tables in 8 rounds of 15 minutes** (about two hours). See §3.4 for other sizes.
 
-### 3.1 Group stage (rounds 1–5)
+### 3.1 Group stage (example: rounds 1–5)
 - Two groups of five: Group 1 = teams 1–5, Group 2 = teams 6–10.
 - Single round robin: each team plays 4 matches and rests (bye) in 1 round.
 - **Tables 1 and 2 = Group 1. Tables 3 and 4 = Group 2.**
@@ -49,7 +49,7 @@ Designed for **10 teams on 4 tables in 8 rounds of 15 minutes** (about two hours
 | 4 | T1 v T3 | T4 v T5 | T6 v T8 | T9 v T10 | T2, T7 |
 | 5 | T2 v T5 | T3 v T4 | T7 v T10 | T8 v T9 | T1, T6 |
 
-### 3.2 Knockout (rounds 6–8)
+### 3.2 Knockout (example: rounds 6–8)
 | Round | Table 1 | Table 2 | Table 3 | Table 4 |
 |---|---|---|---|---|
 | 6 · Quarterfinals | 1st G1 v 4th G2 | 2nd G2 v 3rd G1 | 1st G2 v 4th G1 | 2nd G1 v 3rd G2 |
@@ -65,8 +65,11 @@ Group winners can only meet in the final. Quarterfinal slots fill in automatical
 - **Ball differential**, per match: balls of your own suit pocketed, plus 1 for the 8 if you won with it down, minus the same for your opponent. A match with an open table (no suits set) counts 0–0.
 - The cut line under 4th place is drawn as a dashed gold line.
 
-### 3.4 Other team counts
-The same rules are applied generically: groups are ⌈n/2⌉ and ⌊n/2⌋, round robin by the circle method (odd groups have one bye per round). If both groups have ≥ 4 teams, the top 4 go to quarterfinals. Otherwise the top 2 go straight to semifinals (1st G1 v 2nd G2, 1st G2 v 2nd G1). The number of tables is whatever the busiest round needs.
+### 3.4 Other team and table counts
+- **Groups:** ⌈n/2⌉ and ⌊n/2⌋ teams, in list order. Each group's round robin is made by the circle method.
+- **Tables:** the admin sets **Tables at the venue** (default 4, 1–16, only during setup). Each round takes the round-robin matches in order, alternating between the groups, while a table is free and neither team already plays that round. Group 1's matches go on the first tables. With enough tables this is exactly the round robin above. With fewer tables the group stage takes more rounds, a table can host both groups (its header then says "Both groups"), and more teams rest per round. Extra tables stay free for open play.
+- **Knockout:** if both groups have ≥ 4 teams, the top 4 go to quarterfinals. Otherwise the top 2 go straight to semifinals (1st G1 v 2nd G2, 1st G2 v 2nd G1). A stage that needs more tables than there are spreads over extra rounds (e.g. 3 tables: QF1–3, then QF4 alone). Matches keep their number (`slot`) so labels stay QF1–QF4. The final and 3rd-place match share the last round on tables 1–2; with one table the 3rd-place match goes first.
+- Examples: 12 teams on 4 tables → 8 group rounds, 11 in all. 10 teams on 3 tables → 7 group rounds, 11 in all. 16 teams on 8 tables → 7 group rounds, 10 in all.
 
 ### 3.5 Lifecycle
 ```
@@ -78,7 +81,7 @@ setup ──(Start tournament)──▶ live ──(last match decided)──▶
 - **Start** locks the teams and fixes the schedule.
 - **Reset** (while live) wipes every result and goes back to setup. Teams are kept.
 - **New tournament** (when done) saves the night to the **Hall of fame** (name, date, podium, totals) and goes back to setup with the same teams.
-- Settings: tournament name, match clock (default **15 min**, 0 = none), 3rd-place match on/off (can only be changed during setup).
+- Settings: tournament name, match clock (default **15 min**, 0 = none), tables at the venue (default **4**) and 3rd-place match on/off (the last two only during setup).
 
 ---
 
@@ -116,7 +119,7 @@ setup ──(Start tournament)──▶ live ──(last match decided)──▶
 |---|---|---|
 | `#/` | **Live** (landing) | *Setup:* "Racking up soon" hero with an animated rack, team cards with group badges, Hall of fame. *Live / done:* champion banner (when done), tournament name, **round track** (8 segments filling as matches finish, knockout in gold), **stat tiles** (matches played, balls pocketed, 8-balls sunk, average match time), **On the tables** (one mini pool table per table for the current round: teams, live clock, balls left, suit balls, resting teams), **Group standings**, **Road to the final** (QF → SF → Final + 3rd place), **Leaders** (most wins, balls cleared, fastest win, biggest margin), **Hall of fame** |
 | `#/schedule` | **Schedule grid** | 8 rows (rounds) × 4 columns (tables) + a **Resting** column. Row labels show the stage and the planned start time (start + (r−1) × clock). Group 1 cells are green, Group 2 blue, knockout gold. Unused tables in rounds 7–8 are hatched **Open play**. The current round is highlighted with a "Now" tag, live cells glow with a running clock, winners get a check and losers are struck through. During setup it is a labelled preview. Admins can click a cell to jump to that round in the control room. |
-| `#/rules` | **Rules: Basics** | On-the-table rules (open table, only the 8 is called, legal shot, fouls/ball-in-hand, losing on the 8). The format as a 4-step flow (group stage → QF → SF → Final). Clock, standings, ball differential and schedule rules. |
+| `#/rules` | **Rules: Basics** | On-the-table rules (open table, only the 8 is called, legal shot, fouls/ball-in-hand, losing on the 8). The format as a vertical timeline (group stage → QF → SF → Final) built from tonight's schedule: real team counts, rounds and tables, or a general version until there are 4 teams. Clock, standings, ball differential and schedule rules. |
 | `#/rules/full` | **Rules: Full rules & glossary** | The complete rulebook in 13 numbered sections (table & equipment, racking, the break, open table, turns, legal shot, fouls, ball in hand, shooting the 8, time limit, team play, conduct & disputes, tournament format), with a sticky table of contents. Points that are choices for this tournament carry a gold **House rule** tag. A searchable A–Z **glossary** of 53 terms shows each term with its translation in the other language. The last rules tab you opened is remembered. |
 | `#/admin` | **Control room** | Sign-in, then four tabs: **Tables**, **Teams**, **Tournament**, **Ask Gemini** (the last tab is remembered per device) |
 
@@ -178,11 +181,12 @@ sessions: { [token]: { createdAt } }                      // admin sessions only
 teams:    [{ id, name, members: [{ name, active }, { name, active }], createdAt }]   // order = seed
 event: {
   name, status: 'setup' | 'live' | 'done',
-  clockMinutes, thirdPlace,
+  clockMinutes, thirdPlace, tableCount,                   // tableCount: tables at the venue
   groups: [[teamId…], [teamId…]], groupRounds, rounds, tables, advance,
   matches: [{
     id: 'r{round}t{table}', round, table,
     stage: 'group' | 'qf' | 'sf' | 'final' | 'third', group: 0 | 1 | null,
+    slot,                                   // number within its knockout stage (QF1–QF4, SF1–SF2)
     a, b,                                   // team ids (null until known)
     srcA, srcB,                             // {rank:{group,place}} | {winner:id} | {loser:id}
     winner: 'a' | 'b' | null, result: 'win' | 'timeout' | null,
@@ -223,7 +227,7 @@ JSON bodies. Admin calls need `Authorization: Bearer <token>`.
 | DELETE | `/api/teams/:id` | Remove (setup only) |
 | POST | `/api/teams/:id/move` | `{by: -1 \| 1}` (setup only) |
 | POST | `/api/teams/shuffle` | Random order (setup only) |
-| PATCH | `/api/event` | `{name?, clockMinutes?, thirdPlace?}` |
+| PATCH | `/api/event` | `{name?, clockMinutes?, tableCount?, thirdPlace?}` |
 | POST | `/api/event/start` | Build the schedule and go live |
 | POST | `/api/event/reset` | Back to setup (archives a finished night) |
 | POST | `/api/matches/:id/action` | `start`, `pause`, `restart`, `ball {ball}`, `groups {groupA}`, `timer {op: set\|add\|reset, minutes}`, `winner {slot, reason?}`, `undo` |

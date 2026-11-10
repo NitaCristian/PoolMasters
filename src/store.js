@@ -12,6 +12,7 @@ const newEvent = (prev = {}) => ({
   status: 'setup', // -> 'live' -> 'done'
   clockMinutes: prev.clockMinutes ?? 15,
   thirdPlace: prev.thirdPlace ?? true,
+  tableCount: prev.tableCount ?? 4, // tables at the venue; the schedule fits into these
   groups: [],
   groupRounds: 0,
   rounds: 0,

@@ -243,6 +243,12 @@ route('PATCH', '/api/event', ({ session, body }) => {
       tournament.resetIdleTimers(e);
     }
   }
+  if (body.tableCount !== undefined && Number(body.tableCount) !== e.tableCount) {
+    const n = Number(body.tableCount);
+    if (!Number.isInteger(n) || n < 1 || n > tournament.MAX_TABLES) fail(400, `Tables must be a whole number from 1 to ${tournament.MAX_TABLES}.`);
+    if (e.status !== 'setup') fail(409, 'Set the number of tables before starting.');
+    e.tableCount = n;
+  }
   if (typeof body.thirdPlace === 'boolean' && body.thirdPlace !== e.thirdPlace) {
     if (e.status !== 'setup') fail(409, 'Choose the 3rd-place match before starting.');
     e.thirdPlace = body.thirdPlace;
@@ -320,10 +326,30 @@ function aiToday() {
   return db.ai.usage;
 }
 
+/** The real numbers of this tournament (teams, tables, rounds), so Gemini doesn't guess them. */
+function tonight() {
+  const e = db.event.status === 'setup' ? previewEvent() : db.event;
+  if (!e.matches.length) return `Not scheduled yet: ${db.teams.length} teams so far, ${e.tableCount} tables at the venue. At least 4 teams are needed.`;
+  const span = (list) => {
+    const rounds = [...new Set(list.map((m) => m.round))];
+    return rounds.length > 1 ? `rounds ${rounds[0]}–${rounds.at(-1)}` : `round ${rounds[0]}`;
+  };
+  const stage = (names) => e.matches.filter((m) => names.includes(m.stage));
+  const lines = [
+    `- ${e.groups.flat().length} teams: Group 1 has ${e.groups[0].length}, Group 2 has ${e.groups[1].length}.`,
+    `- ${e.tableCount} tables at the venue; ${e.tables} are used. ${e.rounds} rounds of ${e.clockMinutes} minutes.`,
+    `- Group stage: ${span(stage(['group']))}.`,
+  ];
+  if (e.advance === 4) lines.push(`- Quarterfinals (top 4 of each group): ${span(stage(['qf']))}.`);
+  lines.push(`- Semifinals${e.advance === 2 ? ' (top 2 of each group)' : ''}: ${span(stage(['sf']))}.`);
+  lines.push(`- Final${e.thirdPlace ? ' and 3rd-place match' : ''}: ${span(stage(['final', 'third']))}.`);
+  return lines.join('\n');
+}
+
 function askGemini(lang, messages) {
   if (!ai.hasKey()) fail(409, 'Add a Gemini API key in the settings first.');
   checkAiRate();
-  return ai.ask(aiModel(), ai.systemPrompt(lang, db.event.clockMinutes || 15), messages.slice(-MAX_CONTEXT_MESSAGES));
+  return ai.ask(aiModel(), ai.systemPrompt(lang, db.event.clockMinutes || 15, tonight()), messages.slice(-MAX_CONTEXT_MESSAGES));
 }
 
 route('GET', '/api/ai/settings', ({ session }) => {

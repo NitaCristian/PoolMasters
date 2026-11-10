@@ -3,6 +3,8 @@
 const { fail } = require('./errors');
 
 const MIN_TEAMS = 4;
+const DEFAULT_TABLES = 4;
+const MAX_TABLES = 16;
 const GROUP_LABELS = ['Group 1', 'Group 2'];
 const SOLIDS = [1, 2, 3, 4, 5, 6, 7];
 const STRIPES = [9, 10, 11, 12, 13, 14, 15];
@@ -40,12 +42,13 @@ function newTimer(minutes) {
   return { durationMs: ms, remainingMs: ms, endsAt: null, running: false };
 }
 
-function newMatch(e, { round, table, stage, group = null, a = null, b = null, srcA = null, srcB = null }) {
+function newMatch(e, { round, table, stage, group = null, a = null, b = null, srcA = null, srcB = null, slot = 1 }) {
   return {
     id: `r${round}t${table}`,
     round,
     table,
     stage, // 'group' | 'qf' | 'sf' | 'final' | 'third'
+    slot, // number within its knockout stage: QF1–QF4, SF1–SF2 (stages can span rounds)
     group, // 0 | 1 for group matches
     a,
     b,
@@ -63,39 +66,78 @@ function newMatch(e, { round, table, stage, group = null, a = null, b = null, sr
 }
 
 /**
- * Builds the whole night up front: round-robin in two groups, then a cross-group knockout.
- * With 10 teams that is 5 group rounds on tables 1–4 plus quarterfinals, semifinals and the final.
+ * Fits both groups' round-robin matches onto the venue's tables. Each round takes matches in
+ * round-robin order, alternating between the groups, as long as a table is free and neither
+ * team already plays that round. With enough tables this is exactly the round-robin schedule
+ * (10 teams on 4 tables: Group 1 on tables 1–2, Group 2 on 3–4, 5 rounds). With fewer tables
+ * the group stage simply takes more rounds and more teams rest each round.
+ */
+function packGroupRounds(groups, tables) {
+  const queues = groups.map((ids, g) => roundRobin(ids.length).flatMap(({ pairs }) => pairs.map(([i, j]) => ({ g, a: ids[i], b: ids[j] }))));
+  const rounds = [];
+  while (queues.some((q) => q.length)) {
+    const busy = new Set();
+    const picked = [];
+    // The group with more matches left goes first, so neither group falls behind.
+    let g = queues[0].length >= queues[1].length ? 0 : 1;
+    let stuck = 0;
+    while (picked.length < tables && stuck < 2) {
+      const k = queues[g].findIndex((m) => !busy.has(m.a) && !busy.has(m.b));
+      if (k === -1) {
+        stuck += 1;
+      } else {
+        stuck = 0;
+        const [m] = queues[g].splice(k, 1);
+        busy.add(m.a).add(m.b);
+        picked.push(m);
+      }
+      g = 1 - g;
+    }
+    rounds.push(picked.sort((x, y) => x.g - y.g)); // Group 1 on the first tables
+  }
+  return rounds;
+}
+
+/** One knockout stage over as many rounds as it needs: matches fill tables 1, 2, … in order. */
+function placeStage(e, specs, stage, tables, round) {
+  return specs.map(([srcA, srcB], k) =>
+    newMatch(e, { round: round + Math.floor(k / tables), table: (k % tables) + 1, stage, srcA, srcB, slot: k + 1 }),
+  );
+}
+
+const roundsOf = (stage, tables) => Math.ceil(stage.length / tables);
+
+/**
+ * Builds the whole night up front: round-robin in two groups on the venue's tables, then a
+ * cross-group knockout (quarterfinals when both groups have 4+ teams), semifinals and the final.
  */
 function build(e, teamIds) {
   if (teamIds.length < MIN_TEAMS) fail(409, `Add at least ${MIN_TEAMS} teams first.`);
+  const tables = Math.max(1, Math.min(MAX_TABLES, Math.round(e.tableCount) || DEFAULT_TABLES));
   const half = Math.ceil(teamIds.length / 2);
   const groups = [teamIds.slice(0, half), teamIds.slice(half)];
-  const perGroup = Math.floor(groups[0].length / 2); // tables each group needs per round
   const matches = [];
 
-  const schedules = groups.map((g) => roundRobin(g.length));
-  const groupRounds = Math.max(...schedules.map((s) => s.length));
-  schedules.forEach((rounds, g) => {
-    rounds.forEach(({ pairs }, r) => {
-      pairs.forEach(([i, j], k) => {
-        matches.push(newMatch(e, { round: r + 1, table: g * perGroup + k + 1, stage: 'group', group: g, a: groups[g][i], b: groups[g][j] }));
-      });
-    });
+  const groupStage = packGroupRounds(groups, tables);
+  groupStage.forEach((picked, r) => {
+    picked.forEach(({ g, a, b }, k) => matches.push(newMatch(e, { round: r + 1, table: k + 1, stage: 'group', group: g, a, b })));
   });
+  const groupRounds = groupStage.length;
 
   const advance = Math.min(groups[0].length, groups[1].length) >= 4 ? 4 : 2;
   const rank = (group, place) => ({ rank: { group, place } });
   let round = groupRounds + 1;
   let semis;
   if (advance === 4) {
-    const qf = [
+    const qfSpecs = [
       [rank(0, 1), rank(1, 4)],
       [rank(1, 2), rank(0, 3)],
       [rank(1, 1), rank(0, 4)],
       [rank(0, 2), rank(1, 3)],
-    ].map(([srcA, srcB], k) => newMatch(e, { round, table: k + 1, stage: 'qf', srcA, srcB }));
+    ];
+    const qf = placeStage(e, qfSpecs, 'qf', tables, round);
     matches.push(...qf);
-    round += 1;
+    round += roundsOf(qfSpecs, tables);
     semis = [
       [{ winner: qf[0].id }, { winner: qf[1].id }],
       [{ winner: qf[2].id }, { winner: qf[3].id }],
@@ -106,19 +148,29 @@ function build(e, teamIds) {
       [rank(1, 1), rank(0, 2)],
     ];
   }
-  const sf = semis.map(([srcA, srcB], k) => newMatch(e, { round, table: k + 1, stage: 'sf', srcA, srcB }));
+  const sf = placeStage(e, semis, 'sf', tables, round);
   matches.push(...sf);
-  round += 1;
-  matches.push(newMatch(e, { round, table: 1, stage: 'final', srcA: { winner: sf[0].id }, srcB: { winner: sf[1].id } }));
-  if (e.thirdPlace) {
-    matches.push(newMatch(e, { round, table: 2, stage: 'third', srcA: { loser: sf[0].id }, srcB: { loser: sf[1].id } }));
+  round += roundsOf(semis, tables);
+
+  const final = [{ winner: sf[0].id }, { winner: sf[1].id }];
+  const third = [{ loser: sf[0].id }, { loser: sf[1].id }];
+  if (!e.thirdPlace) {
+    matches.push(newMatch(e, { round, table: 1, stage: 'final', srcA: final[0], srcB: final[1] }));
+  } else if (tables >= 2) {
+    matches.push(newMatch(e, { round, table: 1, stage: 'final', srcA: final[0], srcB: final[1] }));
+    matches.push(newMatch(e, { round, table: 2, stage: 'third', srcA: third[0], srcB: third[1] }));
+  } else {
+    // One table: the 3rd-place match first, so the night ends with the final.
+    matches.push(newMatch(e, { round, table: 1, stage: 'third', srcA: third[0], srcB: third[1] }));
+    round += 1;
+    matches.push(newMatch(e, { round, table: 1, stage: 'final', srcA: final[0], srcB: final[1] }));
   }
 
   Object.assign(e, {
     groups,
     groupRounds,
     rounds: round,
-    tables: Math.max(perGroup * 2, advance),
+    tables: Math.max(...matches.map((m) => m.table)), // tables actually used; never more than tableCount
     advance,
     matches,
     championId: null,
@@ -355,4 +407,4 @@ function resetIdleTimers(e) {
   for (const m of e.matches) if (!touched(m) && !m.timer.running) m.timer = newTimer(e.clockMinutes);
 }
 
-module.exports = { MIN_TEAMS, GROUP_LABELS, roundRobin, build, status, standings, resolve, applyAction, roundAction, resetIdleTimers, cleared };
+module.exports = { MIN_TEAMS, DEFAULT_TABLES, MAX_TABLES, GROUP_LABELS, roundRobin, build, status, standings, resolve, applyAction, roundAction, resetIdleTimers, cleared };
