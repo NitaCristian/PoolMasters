@@ -154,11 +154,12 @@ Dark pool-hall palette (near-black, emerald felt, gold trophy accents), wood-rim
 
 ### 5.7 Control room: Ask Gemini tab
 - Admin only. The admin chats with Google Gemini about the rules. Setup: paste a key in **Tournament → Gemini**. It is checked with Google before it is saved. The model is editable and defaults to `gemini-3.8-flash`.
-- **Rules as context:** every request carries the Basics, the full rulebook (house rules marked) and the glossary as a system instruction, in the chat's language, because the Gemini API has no memory between calls. Rule edits therefore reach existing chats. Gemini is told to answer from these rules first, name the section, and say so when they don't cover something. The last 41 messages of the chat are sent with it.
+- **Rules as context:** every request carries the Basics, the full rulebook (house rules marked) and the glossary as a system instruction, in the chat's language, because the Gemini API has no memory between calls. Rule edits therefore reach existing chats. Gemini is told to answer from these rules first, name the section, and say so when they don't cover something. The last 21 messages of the chat (10 exchanges plus the new question) are sent with it.
 - **Several chats:** a sidebar lists them, newest activity first; each can be reopened or deleted. The title is the start of the first question.
 - **No empty chats:** **New chat** only opens a blank page. The chat is created on the server when the first question has been answered. If Gemini fails, nothing is saved and the question goes back in the box.
 - **When Gemini is overloaded** (Google answers 503 "high demand"), a model that hangs for 40 s counts as busy too. Then the fallback models `gemini-3.6-flash` and `gemini-3.5-flash-lite` are tried in turn, within 90 s in total. Only if they all fail does the admin see "Gemini is very busy right now".
-- Limits: 4000 characters per message, 400 messages per chat, 200 chats, 20 questions per minute.
+- **Cost:** a question costs about 4,500 tokens: ~4,100 for the rules, ~100 of hidden thinking (set to *low*), and the answer, capped at 2,048. The Gemini card shows how many questions were asked today.
+- Limits: 4000 characters per message, 400 messages per chat, 200 chats, 20 questions per minute, 200 per day (kept in `db.json`, reset at local midnight).
 
 ## 6. Real-time model
 
@@ -193,7 +194,7 @@ event: {
   championId, startedAt, completedAt
 }
 history: [{ name, startedAt, completedAt, teams, matches, balls, podium: [{ name, members }|null ×3] }]
-ai:       { model }                                       // null = default model
+ai:       { model, usage: { day, count } }                // model null = default; usage = questions today
 chats:    [{ id, title, lang, createdAt, updatedAt, messages: [{ role: 'user' | 'model', text, at }] }]
 ```
 

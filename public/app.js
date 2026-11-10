@@ -940,6 +940,7 @@ function aiSettingsCard() {
     <form data-form="ai-settings" class="stack" autocomplete="off">
       <label class="field"><span>${t('ai.key')}</span><input id="ai-key" name="apiKey" type="password" autocomplete="new-password" spellcheck="false" maxlength="200" placeholder="${t('ai.keyNew')}" ${a.weakPassword ? 'disabled' : ''}></label>
       <p class="muted small">${a.hasKey ? `${t('ai.keySaved', { hint: esc(a.keyHint) })} ` : ''}${t('ai.keyHelp')}</p>
+      <p class="muted small">${t('ai.usage', { n: a.today, max: a.dailyLimit })}</p>
       <label class="field"><span>${t('ai.model')}</span><input id="ai-model" name="model" maxlength="64" spellcheck="false" value="${esc(a.model)}"></label>
       <div class="btn-row">
         <button class="btn primary" type="submit">${icon('check')} ${t('save')}</button>

@@ -22,8 +22,10 @@ const WEAK_PASSWORD = ADMIN_PASSWORD === 'poolmasters';
 const MAX_CHATS = 200;
 const MAX_CHAT_MESSAGES = 400;
 const MAX_MESSAGE_CHARS = 4000;
-const MAX_CONTEXT_MESSAGES = 41; // odd, so the part we send always starts with a question
+// Every question re-sends the rules (~4,100 tokens) plus this much history, so keep it short: the last 10 exchanges.
+const MAX_CONTEXT_MESSAGES = 21; // odd, so the part we send always starts with a question
 const AI_PER_MINUTE = 20;
+const AI_PER_DAY = 200; // a safety net for the bill; a busy night needs a few dozen
 
 const db = store.load();
 ai.loadKey(ADMIN_PASSWORD);
@@ -283,6 +285,8 @@ const aiSettings = () => ({
   keyHint: ai.keyHint(),
   model: aiModel(),
   weakPassword: WEAK_PASSWORD,
+  today: aiToday().count,
+  dailyLimit: AI_PER_DAY,
   ...ai.rulesInfo(),
 });
 
@@ -303,7 +307,17 @@ function checkAiRate() {
   const cutoff = Date.now() - 60 * 1000;
   aiCalls = aiCalls.filter((at) => at > cutoff);
   if (aiCalls.length >= AI_PER_MINUTE) fail(429, 'Too many questions. Wait a minute and try again.');
+  const today = aiToday();
+  if (today.count >= AI_PER_DAY) fail(429, `That's ${AI_PER_DAY} questions today, the daily limit. It resets at midnight.`);
   aiCalls.push(Date.now());
+  today.count += 1;
+}
+
+/** Questions asked today (kept in db.json, so a restart doesn't reset it). */
+function aiToday() {
+  const day = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD in local time
+  if (db.ai.usage?.day !== day) db.ai.usage = { day, count: 0 };
+  return db.ai.usage;
 }
 
 function askGemini(lang, messages) {

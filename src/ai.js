@@ -130,6 +130,7 @@ async function request(url, { key, timeoutMs = TIMEOUT_MS, ...options }, rejecte
     fail(502, 'Could not reach Gemini. Try again.');
   }
   if (res.ok) return data;
+  if (res.status === 400 && /thinking/i.test(data.error?.message ?? '')) fail(422, 'thinking'); // see generate()
   if (res.status === 401 || res.status === 403 || /api.key/i.test(data.error?.message ?? '')) fail(502, rejected);
   if (res.status === 429) fail(429, 'Gemini is busy or the key is out of quota. Try again in a minute.');
   if (res.status === 404) fail(502, 'Gemini does not know that model. Check the model name in the settings.');
@@ -159,20 +160,32 @@ async function ask(model, system, messages) {
   return fail(503, BUSY);
 }
 
-async function generate(model, system, messages, timeoutMs) {
-  const data = await request(
-    `${API_BASE}/models/${encodeURIComponent(model)}:generateContent`,
-    {
-      method: 'POST',
-      timeoutMs,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: system }] },
-        contents: messages.map((m) => ({ role: m.role, parts: [{ text: m.text }] })),
-      }),
-    },
-    'Gemini rejected the API key. Check it in the settings.',
-  );
+// Costs: the hidden "thinking" is billed like an answer. Low thinking cut it from ~300 to ~100 tokens
+// per question with the same answers, and halved the wait. The cap stops a runaway answer.
+const GENERATION = { maxOutputTokens: 2048, thinkingConfig: { thinkingLevel: 'low' } };
+
+async function generate(model, system, messages, timeoutMs, generationConfig = GENERATION) {
+  let data;
+  try {
+    data = await request(
+      `${API_BASE}/models/${encodeURIComponent(model)}:generateContent`,
+      {
+        method: 'POST',
+        timeoutMs,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: system }] },
+          contents: messages.map((m) => ({ role: m.role, parts: [{ text: m.text }] })),
+          generationConfig,
+        }),
+      },
+      'Gemini rejected the API key. Check it in the settings.',
+    );
+  } catch (err) {
+    // A model without a thinking setting rejects it: ask again without.
+    if (err.status === 422) return generate(model, system, messages, timeoutMs, { maxOutputTokens: GENERATION.maxOutputTokens });
+    throw err;
+  }
   const text = (data.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? '').join('').trim();
   return text || fail(502, 'Gemini returned no answer. Try rephrasing the question.');
 }
